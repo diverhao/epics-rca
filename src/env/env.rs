@@ -1,18 +1,23 @@
 use std::collections::HashMap;
 use std::fmt;
 use std::env;
+use ::log::{debug, error, info, trace, warn};
 
 /**
  * Type of an environment variable.
  * 
+ * Some types may not be used.
  */
 #[derive(Debug, Clone)]
 pub enum EnvType {
     String(String),
     StringArray(Vec<String>),
-    Number(f64),
-    NumberArray(Vec<f64>),
+    Double(f64),
+    DoubleArray(Vec<f64>),
+    Integer(i32),
+    IntegerArray(Vec<i32>),
     Boolean(bool),
+    BooleanArray(Vec<bool>),
 }
 
 pub enum EnvSource {
@@ -49,12 +54,21 @@ impl fmt::Display for Env {
             match v {
                 EnvType::String(s)        => format!("\"{s}\""),
                 EnvType::StringArray(arr) => format!("[{}]", arr.join(", ")),
-                EnvType::Number(n)        => format!("{n}"),
-                EnvType::NumberArray(arr) => {
+                EnvType::Integer(n)        => format!("{n}"),
+                EnvType::IntegerArray(arr) => {
+                    let nums: Vec<String> = arr.iter().map(|n| n.to_string()).collect();
+                    format!("[{}]", nums.join(", "))
+                },
+                EnvType::Double(n)        => format!("{n}"),
+                EnvType::DoubleArray(arr) => {
                     let nums: Vec<String> = arr.iter().map(|n| n.to_string()).collect();
                     format!("[{}]", nums.join(", "))
                 },
                 EnvType::Boolean(b)       => format!("{b}"),
+                EnvType::BooleanArray(arr) => {
+                    let bools: Vec<String> = arr.iter().map(|n| n.to_string()).collect();
+                    format!("[{}]", bools.join(", "))
+                },
             }
         }
 
@@ -154,6 +168,9 @@ impl Env {
         self.set("EPICS_CA_ADDR_LIST", EnvType::StringArray(epics_ca_addr_list), EnvSource::Default);
         let epics_ca_auto_addr_list = true;
         self.set("EPICS_CA_AUTO_ADDR_LIST", EnvType::Boolean(epics_ca_auto_addr_list), EnvSource::Default);
+        let epics_ca_max_array_bytes: i32 = 168000;
+        self.set("EPICS_CA_MAX_ARRAY_BYTES", EnvType::Integer(epics_ca_max_array_bytes), EnvSource::Default);
+        
     }
 
     fn read_os_env(self: &mut Self) {        
@@ -168,44 +185,61 @@ impl Env {
 
     /// Parse an OS environment string into the appropriate EnvType,
     /// guided by the default value's type.
-    fn parse_os_value(self: &mut Self, name: &str, raw: &str, default_value: &EnvType) -> EnvType {
-        match default_value {
-            // EnvType::StringArray(_) => {
-            //     let parts: Vec<String> = raw
-            //         .split_whitespace()
-            //         .map(|s| s.to_string())
-            //         .collect();
-            //     EnvType::StringArray(parts)
-            // }
-            // EnvType::Number(_) => {
-            //     raw.parse::<f64>()
-            //         .map(EnvType::Number)
-            //         .unwrap_or_else(|_| EnvType::String(raw.to_string()))
-            // }
-            // EnvType::NumberArray(_) => {
-            //     let parts: Vec<f64> = raw
-            //         .split_whitespace()
-            //         .filter_map(|s| s.parse::<f64>().ok())
-            //         .collect();
-            //     if parts.is_empty() {
-            //         EnvType::String(raw.to_string())
-            //     } else {
-            //         EnvType::NumberArray(parts)
-            //     }
-            // }
-            EnvType::Boolean(_) => {
-                if let Ok(bool_value) = raw.parse::<bool>() {
-                    self.set(name, EnvType::Boolean(bool_value), EnvSource::Os);
-                }
+    fn parse_os_value(self: &mut Self, name: &str, raw: &str, default_value: &EnvType) -> () {
+        debug!("Parsing variable {}", name);
 
-                // raw.parse::<bool>()
-                    // .map(EnvType::Boolean)
-                    // .unwrap_or_else(|_| EnvType::String(raw.to_string()))
+        match default_value {
+            EnvType::String(_) => {
+                let string_value = raw.trim().to_string();
+                self.set(name, EnvType::String(string_value), EnvSource::Os);
+            }
+            EnvType::StringArray(_) => {
+                let string_array_value: Vec<String> = raw
+                    .split_whitespace()
+                    .map(|s| s.to_string())
+                    .collect();
+                self.set(name, EnvType::StringArray(string_array_value), EnvSource::Os);
+            }
+            EnvType::Integer(_) => {
+                if let Ok(integer_value) = raw.parse::<i32>() {
+                    self.set(name, EnvType::Integer(integer_value), EnvSource::Os);
+                } else {
+                    debug!("not goadkflakd");
+                }
+            }
+            EnvType::IntegerArray(_) => {
+                let integer_array_value: Vec<i32> = raw
+                    .split_whitespace()
+                    .filter_map(|s| s.parse::<i32>().ok())
+                    .collect();
+                self.set(name, EnvType::IntegerArray(integer_array_value), EnvSource::Os);
+            }
+            EnvType::Double(_) => {
+                if let Ok(double_value) = raw.parse::<f64>() {
+                    self.set(name, EnvType::Double(double_value), EnvSource::Os);
+                }
+            }
+            EnvType::DoubleArray(_) => {
+                let double_array_value: Vec<f64> = raw
+                    .split_whitespace()
+                    .filter_map(|s| s.parse::<f64>().ok())
+                    .collect();
+                self.set(name, EnvType::DoubleArray(double_array_value), EnvSource::Os);
+            }
+            EnvType::Boolean(_) => {
+                if let Ok(boolean_value) = raw.parse::<bool>() {
+                    self.set(name, EnvType::Boolean(boolean_value), EnvSource::Os);
+                }
+            }
+            EnvType::BooleanArray(_) => {
+                let boolean_array_value: Vec<bool> = raw.split_whitespace().filter_map(|s| s.parse::<bool>().ok()).collect();
+                self.set(name, EnvType::BooleanArray(boolean_array_value), EnvSource::Os);
             }
             // Default is string or no default → keep as string
-            _ => {},
-        }
-        EnvType::String(String::from("abc"))
+            _ => {
+                println!("Failed to parse OS environment variable {}", name);
+            },
+        };
     }
 
     fn set_user_env(self: &mut Self, user_env: HashMap<String, EnvType>) {
