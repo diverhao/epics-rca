@@ -10,16 +10,15 @@ use ::log::LevelFilter;
 use ::log::{debug, error, info, trace, warn};
 
 fn main() {
-    init_log(LevelFilter::Debug);
-    debug!("OKOKOK");
+    init_log(LevelFilter::Info);
+
     let user_env = HashMap::from([
-        ("EPICS_CA_ADDR_LIST".to_string(), EnvType::StringArray(vec!["1.2.3.4".to_string()])),
-        ("EPICS_CA_AUTO_ADDR_LIST".to_string(), EnvType::Boolean(true)),
+        ("EPICS_CA_ADDR_LIST", "1.2.3.4"),
+        ("EPICS_CA_AUTO_ADDR_LIST", "NO"),
     ]);
     let mut env = Env::new(user_env);
     let mut context = Context {
         env: env,
     };
 
-    println!("{}", context.env);
 }
