@@ -1,11 +1,11 @@
+use ::log::{debug, info, warn};
 use std::collections::HashMap;
-use std::fmt;
 use std::env;
-use ::log::{debug, error, info, trace, warn};
+use std::fmt;
 
 /**
  * Type of an environment variable.
- * 
+ *
  * Some types may not be used.
  */
 #[derive(Debug, Clone)]
@@ -20,6 +20,7 @@ pub enum EnvType {
     BooleanArray(Vec<bool>),
 }
 
+#[derive(Debug, Clone)]
 pub enum EnvSource {
     Default,
     Os,
@@ -27,8 +28,11 @@ pub enum EnvSource {
 }
 
 pub struct Env {
+    // EPICS default env
     default: HashMap<String, EnvType>,
+    // Operating system defined env
     os: HashMap<String, EnvType>,
+    // User defined env
     user: HashMap<String, EnvType>,
 }
 
@@ -52,65 +56,109 @@ impl fmt::Display for Env {
         // Helper to format an EnvValue for display
         fn fmt_val(v: &EnvType) -> String {
             match v {
-                EnvType::String(s)        => format!("\"{s}\""),
+                EnvType::String(s) => format!("\"{s}\""),
                 EnvType::StringArray(arr) => format!("[{}]", arr.join(", ")),
-                EnvType::Integer(n)        => format!("{n}"),
+                EnvType::Integer(n) => format!("{n}"),
                 EnvType::IntegerArray(arr) => {
                     let nums: Vec<String> = arr.iter().map(|n| n.to_string()).collect();
                     format!("[{}]", nums.join(", "))
-                },
-                EnvType::Double(n)        => format!("{n}"),
+                }
+                EnvType::Double(n) => format!("{n}"),
                 EnvType::DoubleArray(arr) => {
                     let nums: Vec<String> = arr.iter().map(|n| n.to_string()).collect();
                     format!("[{}]", nums.join(", "))
-                },
-                EnvType::Boolean(b)       => format!("{b}"),
+                }
+                EnvType::Boolean(b) => format!("{b}"),
                 EnvType::BooleanArray(arr) => {
                     let bools: Vec<String> = arr.iter().map(|n| n.to_string()).collect();
                     format!("[{}]", bools.join(", "))
-                },
+                }
             }
         }
 
         // Determine column widths
         let name_width = all_names.iter().map(|n| n.len()).max().unwrap_or(4).max(7);
-        let default_width = self.default.values()
+        let default_width = self
+            .default
+            .values()
             .map(|v| fmt_val(v).len())
-            .max().unwrap_or(7).max(7);
-        let os_width = self.os.values()
+            .max()
+            .unwrap_or(7)
+            .max(7);
+        let os_width = self
+            .os
+            .values()
             .map(|v| fmt_val(v).len())
-            .max().unwrap_or(2).max(2);
-        let user_width = self.user.values()
+            .max()
+            .unwrap_or(2)
+            .max(2);
+        let user_width = self
+            .user
+            .values()
             .map(|v| fmt_val(v).len())
-            .max().unwrap_or(4).max(4);
+            .max()
+            .unwrap_or(4)
+            .max(4);
 
         // Header
-        writeln!(f, "┌{:─^name_width$}┬{:─^default_width$}┬{:─^os_width$}┬{:─^user_width$}┐",
-            "", "", "", "",
+        writeln!(
+            f,
+            "┌{:─^name_width$}┬{:─^default_width$}┬{:─^os_width$}┬{:─^user_width$}┐",
+            "",
+            "",
+            "",
+            "",
             name_width = name_width + 2,
             default_width = default_width + 2,
             os_width = os_width + 2,
-            user_width = user_width + 2)?;
-        writeln!(f, "│ {:^name_width$} │ {:^default_width$} │ {:^os_width$} │ {:^user_width$} │",
-            "VARIABLE", "DEFAULT", "OS", "USER",
+            user_width = user_width + 2
+        )?;
+        writeln!(
+            f,
+            "│ {:^name_width$} │ {:^default_width$} │ {:^os_width$} │ {:^user_width$} │",
+            "VARIABLE",
+            "DEFAULT",
+            "OS",
+            "USER",
             name_width = name_width,
             default_width = default_width,
             os_width = os_width,
-            user_width = user_width)?;
-        writeln!(f, "├{:─^name_width$}┼{:─^default_width$}┼{:─^os_width$}┼{:─^user_width$}┤",
-            "", "", "", "",
+            user_width = user_width
+        )?;
+        writeln!(
+            f,
+            "├{:─^name_width$}┼{:─^default_width$}┼{:─^os_width$}┼{:─^user_width$}┤",
+            "",
+            "",
+            "",
+            "",
             name_width = name_width + 2,
             default_width = default_width + 2,
             os_width = os_width + 2,
-            user_width = user_width + 2)?;
+            user_width = user_width + 2
+        )?;
 
         // Data rows
         for name in &all_names {
-            let default_val = self.default.get(*name).map(|v| fmt_val(v)).unwrap_or("—".to_string());
-            let os_val = self.os.get(*name).map(|v| fmt_val(v)).unwrap_or("—".to_string());
-            let user_val = self.user.get(*name).map(|v| fmt_val(v)).unwrap_or("—".to_string());
+            let default_val = self
+                .default
+                .get(*name)
+                .map(|v| fmt_val(v))
+                .unwrap_or("—".to_string());
+            let os_val = self
+                .os
+                .get(*name)
+                .map(|v| fmt_val(v))
+                .unwrap_or("—".to_string());
+            let user_val = self
+                .user
+                .get(*name)
+                .map(|v| fmt_val(v))
+                .unwrap_or("—".to_string());
 
-            writeln!(f, "│ {: <name_width$} │ {: <default_width$} │ {: <os_width$} │ {: <user_width$} │",
+            writeln!(
+                f,
+                "│ {: <name_width$} │ {: <default_width$} │ {: <os_width$} │ {: <user_width$} │",
                 name,
                 default_val,
                 os_val,
@@ -118,16 +166,23 @@ impl fmt::Display for Env {
                 name_width = name_width,
                 default_width = default_width,
                 os_width = os_width,
-                user_width = user_width)?;
+                user_width = user_width
+            )?;
         }
 
         // Footer
-        write!(f, "└{:─^name_width$}┴{:─^default_width$}┴{:─^os_width$}┴{:─^user_width$}┘",
-            "", "", "", "",
+        write!(
+            f,
+            "└{:─^name_width$}┴{:─^default_width$}┴{:─^os_width$}┴{:─^user_width$}┘",
+            "",
+            "",
+            "",
+            "",
             name_width = name_width + 2,
             default_width = default_width + 2,
             os_width = os_width + 2,
-            user_width = user_width + 2)
+            user_width = user_width + 2
+        )
     }
 }
 
@@ -156,62 +211,121 @@ impl Env {
         dest_map.insert(name.to_string(), value);
     }
 
-    pub fn get(self: &Self, name: &str) {
-
-    }
-
     /**
      * Read default environment variables
      */
     fn load_default_env(self: &mut Self) {
         // Channel Access defaults
-        self.set("EPICS_CA_ADDR_LIST",
-            EnvType::StringArray(vec!["127.0.0.1".to_string()]), EnvSource::Default);
-        self.set("EPICS_CA_AUTO_ADDR_LIST",
-            EnvType::String("YES".to_string()), EnvSource::Default);
-        self.set("EPICS_CA_CONN_TMO",
-            EnvType::Double(30.0), EnvSource::Default);
-        self.set("EPICS_CA_REPEATER_PORT",
-            EnvType::Integer(5065), EnvSource::Default);
-        self.set("EPICS_CA_SERVER_PORT",
-            EnvType::Integer(5064), EnvSource::Default);
-        self.set("EPICS_CA_MAX_ARRAY_BYTES",
-            EnvType::Integer(16384), EnvSource::Default);
-        self.set("EPICS_CA_AUTO_ARRAY_BYTES",
-            EnvType::Integer(16384), EnvSource::Default);
-        self.set("EPICS_CA_MAX_SEARCH_PERIOD",
-            EnvType::Double(300.0), EnvSource::Default);
-        self.set("EPICS_CA_NAME_SERVERS",
-            EnvType::String("".to_string()), EnvSource::Default);
-        self.set("EPICS_CA_MCAST_TTL",
-            EnvType::Integer(1), EnvSource::Default);
-        self.set("EPICS_CA_BEACON_PERIOD",
-            EnvType::Double(15.0), EnvSource::Default);
+        self.set(
+            "EPICS_CA_ADDR_LIST",
+            EnvType::StringArray(vec!["127.0.0.1".to_string()]),
+            EnvSource::Default,
+        );
+        self.set(
+            "EPICS_CA_AUTO_ADDR_LIST",
+            EnvType::String("YES".to_string()),
+            EnvSource::Default,
+        );
+        self.set(
+            "EPICS_CA_CONN_TMO",
+            EnvType::Double(30.0),
+            EnvSource::Default,
+        );
+        self.set(
+            "EPICS_CA_REPEATER_PORT",
+            EnvType::Integer(5065),
+            EnvSource::Default,
+        );
+        self.set(
+            "EPICS_CA_SERVER_PORT",
+            EnvType::Integer(5064),
+            EnvSource::Default,
+        );
+        self.set(
+            "EPICS_CA_MAX_ARRAY_BYTES",
+            EnvType::Integer(16384),
+            EnvSource::Default,
+        );
+        self.set(
+            "EPICS_CA_AUTO_ARRAY_BYTES",
+            EnvType::Integer(16384),
+            EnvSource::Default,
+        );
+        self.set(
+            "EPICS_CA_MAX_SEARCH_PERIOD",
+            EnvType::Double(300.0),
+            EnvSource::Default,
+        );
+        self.set(
+            "EPICS_CA_NAME_SERVERS",
+            EnvType::String("".to_string()),
+            EnvSource::Default,
+        );
+        self.set(
+            "EPICS_CA_MCAST_TTL",
+            EnvType::Integer(1),
+            EnvSource::Default,
+        );
+        self.set(
+            "EPICS_CA_BEACON_PERIOD",
+            EnvType::Double(15.0),
+            EnvSource::Default,
+        );
 
         // PVAccess defaults
-        self.set("EPICS_PVA_ADDR_LIST",
-            EnvType::StringArray(vec![String::new()]), EnvSource::Default);
-        self.set("EPICS_PVA_AUTO_ADDR_LIST",
-            EnvType::String("YES".to_string()), EnvSource::Default);
-        self.set("EPICS_PVA_SERVER_PORT",
-            EnvType::Integer(5075), EnvSource::Default);
-        self.set("EPICS_PVA_BEACON_PERIOD",
-            EnvType::Double(15.0), EnvSource::Default);
-        self.set("EPICS_PVA_CONN_TMO",
-            EnvType::Double(30.0), EnvSource::Default);
-        self.set("EPICS_PVA_BROADCAST_PORT",
-            EnvType::Integer(5076), EnvSource::Default);
-        self.set("EPICS_PVA_NAME_SERVERS",
-            EnvType::String("".to_string()), EnvSource::Default);
-        self.set("EPICS_PVA_MAX_ARRAY_BYTES",
-            EnvType::Integer(16384), EnvSource::Default);
-        self.set("EPICS_PVA_SEARCH_MAX_INTERVAL",
-            EnvType::Double(300.0), EnvSource::Default);
-        self.set("EPICS_PVA_PROVIDER_NAMES",
-            EnvType::String("".to_string()), EnvSource::Default);
+        self.set(
+            "EPICS_PVA_ADDR_LIST",
+            EnvType::StringArray(vec![String::new()]),
+            EnvSource::Default,
+        );
+        self.set(
+            "EPICS_PVA_AUTO_ADDR_LIST",
+            EnvType::String("YES".to_string()),
+            EnvSource::Default,
+        );
+        self.set(
+            "EPICS_PVA_SERVER_PORT",
+            EnvType::Integer(5075),
+            EnvSource::Default,
+        );
+        self.set(
+            "EPICS_PVA_BEACON_PERIOD",
+            EnvType::Double(15.0),
+            EnvSource::Default,
+        );
+        self.set(
+            "EPICS_PVA_CONN_TMO",
+            EnvType::Double(30.0),
+            EnvSource::Default,
+        );
+        self.set(
+            "EPICS_PVA_BROADCAST_PORT",
+            EnvType::Integer(5076),
+            EnvSource::Default,
+        );
+        self.set(
+            "EPICS_PVA_NAME_SERVERS",
+            EnvType::String("".to_string()),
+            EnvSource::Default,
+        );
+        self.set(
+            "EPICS_PVA_MAX_ARRAY_BYTES",
+            EnvType::Integer(16384),
+            EnvSource::Default,
+        );
+        self.set(
+            "EPICS_PVA_SEARCH_MAX_INTERVAL",
+            EnvType::Double(300.0),
+            EnvSource::Default,
+        );
+        self.set(
+            "EPICS_PVA_PROVIDER_NAMES",
+            EnvType::String("".to_string()),
+            EnvSource::Default,
+        );
     }
 
-    fn read_os_env(self: &mut Self) {        
+    fn read_os_env(self: &mut Self) {
         debug!("----- parsing OS env ------");
         for (name, _default_value) in &self.default.clone() {
             if let Ok(os_value_raw) = env::var(name) {
@@ -253,15 +367,13 @@ impl Env {
                 self.set(name, EnvType::String(string_value), source);
             }
             EnvType::StringArray(_) => {
-                let string_array_value: Vec<String> = raw
-                    .split_whitespace()
-                    .map(|s| s.to_string())
-                    .collect();
+                let string_array_value: Vec<String> =
+                    raw.split_whitespace().map(|s| s.to_string()).collect();
                 if string_array_value.len() > 0 {
                     self.set(name, EnvType::StringArray(string_array_value), source);
                 } else {
                     self.print_parse_value_error(raw, name);
-                }                
+                }
             }
             EnvType::Integer(_) => {
                 if let Ok(integer_value) = raw.parse::<i32>() {
@@ -307,7 +419,10 @@ impl Env {
                 }
             }
             EnvType::BooleanArray(_) => {
-                let boolean_array_value: Vec<bool> = raw.split_whitespace().filter_map(|s| s.parse::<bool>().ok()).collect();
+                let boolean_array_value: Vec<bool> = raw
+                    .split_whitespace()
+                    .filter_map(|s| s.parse::<bool>().ok())
+                    .collect();
                 if boolean_array_value.len() > 0 {
                     self.set(name, EnvType::BooleanArray(boolean_array_value), source);
                 } else {
@@ -327,5 +442,35 @@ impl Env {
     fn get_os_env(self: &Self, name: &str) -> Option<&EnvType> {
         self.os.get(name)
     }
-}
 
+    pub fn get_env(self: &Self, name: &str) -> Option<&EnvType> {
+        if let Some(value) = self.get_user_env(name) {
+            Some(value)
+        } else if let Some(value) = self.get_os_env(name) {
+            Some(value)
+        } else if let Some(value) = self.get_default_env(name) {
+            Some(value)
+        } else {
+            None
+        }
+    }
+
+    /**
+     * Returns which source provides the value for the given variable name.
+     *
+     * Priority: User > OS > Default.
+     *
+     * Returns `None` if the variable is not defined in any source.
+     */
+    pub fn get_env_source(self: &Self, name: &str) -> Option<EnvSource> {
+        if let Some(_value) = self.get_user_env(name) {
+            Some(EnvSource::User)
+        } else if let Some(_value) = self.get_os_env(name) {
+            Some(EnvSource::Os)
+        } else if let Some(_value) = self.get_default_env(name) {
+            Some(EnvSource::Default)
+        } else {
+            None
+        }
+    }
+}
