@@ -132,7 +132,8 @@ impl fmt::Display for Env {
 }
 
 impl Env {
-    pub fn new(user_env: HashMap<&str, &str>) -> Self {
+    pub fn new(user_env: Vec<(&str, &str)>) -> Self {
+        let user_env: HashMap<&str, &str> = user_env.into_iter().collect();
         // create an empty struct
         let mut env = Env {
             default: HashMap::new(), // key-value types are inferred
@@ -316,8 +317,15 @@ impl Env {
         };
     }
 
-    fn set_user_env(self: &mut Self, user_env: HashMap<String, EnvType>) {
-        self.user = user_env;
+    fn get_default_env(self: &Self, name: &str) -> Option<&EnvType> {
+        self.default.get(name)
+    }
+
+    fn get_user_env(self: &Self, name: &str) -> Option<&EnvType> {
+        self.user.get(name)
+    }
+    fn get_os_env(self: &Self, name: &str) -> Option<&EnvType> {
+        self.os.get(name)
     }
 }
 
