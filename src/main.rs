@@ -3,30 +3,37 @@ mod context;
 mod env;
 mod udp;
 
-use std::sync::Mutex;
-
+use crate::context::context::{create_context, get_runtime};
 use ::log::LevelFilter;
-use context::context::CONTEXT;
-use context::context::Context;
-use crate::context::context::create_context;
-use crate::context::context::get_context;
 
-
-fn main() {
+#[tokio::main]
+async fn main() {
     create_context(
         vec![
             ("EPICS_CA_ADDR_LIST", "1.2.3.4"),
             ("EPICS_CA_AUTO_ADDR_LIST", "NO"),
         ],
         LevelFilter::Info,
-    );
+    )
+    .await;
 
-    let context: std::sync::MutexGuard<'_, Context> = get_context();
+    let runtime = get_runtime();
+    let context = runtime.context();
 
     println!("{:?}", context.env.get_env("EPICS_CA_BEACON_PERIOD"));
     println!(
         "{:?}",
         context.env.get_env_source("EPICS_CA_BEACON_PERIODaaa")
+    );
+
+    context.udp.send_ca(
+        &runtime,
+        udp::udp::CaCmd::CaProtoBuild,
+        22,
+        channel::channel::DbrType::Char,
+        33,
+        22,
+        55,
     );
 
     // let mut channel = channel::channel::Channel::new("ABCD");

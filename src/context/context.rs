@@ -1,40 +1,70 @@
 use super::log::init_log;
 use crate::env::env::Env;
+use crate::udp::udp::UDP;
 use ::log::LevelFilter;
 use ::log::info;
 use std::sync::Mutex;
+use std::sync::MutexGuard;
 use std::sync::OnceLock;
 
-// Declare the global — starts empty, set once
-pub static CONTEXT: OnceLock<Mutex<Context>> = OnceLock::new();
+pub static RUNTIME: OnceLock<Mutex<Runtime>> = OnceLock::new();
+
+pub struct Runtime {
+    context: Option<Context>,
+}
+
+impl Runtime {
+    fn new() -> Self {
+        Self { context: None }
+    }
+
+    fn set_context(&mut self, context: Context) {
+        self.context = Some(context);
+    }
+
+    pub fn context(&self) -> &Context {
+        self.context.as_ref().expect("context has not been created")
+    }
+}
 
 pub struct Context {
     pub env: Env,
-    pub log_level: LevelFilter,
+    log_level: LevelFilter,
+    pub udp: UDP,
 }
 
 impl Context {
-    pub fn create(user_env: Vec<(&str, &str)>, log_level: LevelFilter) -> () {
+    pub async fn create(user_env: Vec<(&str, &str)>, log_level: LevelFilter) {
+        init_log(log_level);
+
+        let mut runtime = Runtime::new();
         let context = Context {
             env: Env::new(user_env),
-            log_level: log_level,
+            log_level,
+            udp: UDP::new().await,
         };
-        init_log(LevelFilter::Info);
 
         info!(
             "This EPICS client runs with following settings: \n{}",
             context.env
         );
-        CONTEXT.set(Mutex::new(context)).ok();
-        let ctx: std::sync::MutexGuard<'static, Context> = CONTEXT.get().unwrap().lock().unwrap();
-        // ctx
+
+        runtime.set_context(context);
+
+        if RUNTIME.set(Mutex::new(runtime)).is_err() {
+            panic!("runtime has already been created");
+        }
     }
 }
 
-pub fn create_context(user_env: Vec<(&str, &str)>, log_level: LevelFilter) {
-    Context::create(user_env, log_level);
+pub async fn create_context(user_env: Vec<(&str, &str)>, log_level: LevelFilter) {
+    Context::create(user_env, log_level).await
 }
 
-pub fn get_context() -> std::sync::MutexGuard<'static, Context> {
-    CONTEXT.get().unwrap().lock().unwrap()
+pub fn get_runtime() -> MutexGuard<'static, Runtime> {
+    RUNTIME
+        .get()
+        .expect("runtime has not been created")
+        .lock()
+        .expect("runtime mutex is poisoned")
 }

@@ -1,3 +1,6 @@
+use crate::channel::channel::DbrType;
+use crate::context::context::Runtime;
+use crate::env::env::EnvType;
 use tokio::net::UdpSocket;
 
 #[repr(u16)]
@@ -41,7 +44,7 @@ pub struct UDP {
 }
 
 impl UDP {
-    pub async fn new() {
+    pub async fn new() -> Self {
         // bind to all interfaces for both v4 and v6
         // panic if fail
         let socket_v4: UdpSocket = UdpSocket::bind("0.0.0.0:0").await.unwrap();
@@ -50,6 +53,7 @@ impl UDP {
             socket_v4: socket_v4,
             socket_v6: socket_v6,
         };
+        udp
     }
 
     /**
@@ -57,15 +61,30 @@ impl UDP {
      */
     pub fn send_ca(
         self: &Self,
-        cmd: CaCmd,
-        payload_size: u16,
-        data_type: DbrType,
-        data_count: u16,
-        param1: u32,
-        param2: u32,
+        runtime: &Runtime,
+        _cmd: CaCmd,
+        _payload_size: u16,
+        _data_type: DbrType,
+        _data_count: u16,
+        _param1: u32,
+        _param2: u32,
     ) {
-        let hosts = 
+        println!("OKOKOK");
+        let context = runtime.context();
+        let env = &context.env;
+        let epics_ca_addr_list = env.get_env("EPICS_CA_ADDR_LIST");
+        println!("OKOKOK 0");
+        if let Some(epics_ca_addr_list) = epics_ca_addr_list {
+            println!("OKOKOK 1");
+            // send to
+            if let EnvType::StringArray(epics_ca_addr_list) = epics_ca_addr_list {
+                println!("{:?}", epics_ca_addr_list);
+            }
+        } else {
+            println!("OKOKOK 2");
+            return;
+        }
         // assemble message
-        // 
+        //
     }
 }
