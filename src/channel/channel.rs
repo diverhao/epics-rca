@@ -1,4 +1,4 @@
-#[derive(Debug)]
+#[derive(Copy, Clone, Debug)]
 pub enum ChannelState {
     NeverConnected,
     Connected,
@@ -6,12 +6,14 @@ pub enum ChannelState {
     Destroyed,
 }
 
+#[derive(Copy, Clone, Debug)]
 pub enum ChannelAccessRights {
-    None,        // Neither read nor write
-    Read,        // Read access only
-    ReadWrite    // Both read and write
+    None,      // Neither read nor write
+    Read,      // Read access only
+    ReadWrite, // Both read and write
 }
 
+#[derive(Copy, Clone, Debug)]
 pub enum DbrType {
     String,
     // Int,
@@ -68,8 +70,6 @@ pub enum DbrType {
 
 // status
 
-
-
 pub struct Channel {
     pub name: String,
     pub state: ChannelState,
@@ -77,7 +77,11 @@ pub struct Channel {
 
 impl std::fmt::Display for Channel {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "Channel {{ name: {}, state: {:?} }}", self.name, self.state)
+        write!(
+            f,
+            "Channel {{ name: {}, state: {:?} }}",
+            self.name, self.state
+        )
     }
 }
 
@@ -89,7 +93,4 @@ impl Channel {
         };
         channel
     }
-
-
-
 }

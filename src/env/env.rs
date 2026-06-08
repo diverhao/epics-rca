@@ -432,14 +432,14 @@ impl Env {
         };
     }
 
-    fn get_default_env(self: &Self, name: &str) -> Option<&EnvType> {
+    pub fn get_default_env(self: &Self, name: &str) -> Option<&EnvType> {
         self.default.get(name)
     }
 
-    fn get_user_env(self: &Self, name: &str) -> Option<&EnvType> {
+    pub fn get_user_env(self: &Self, name: &str) -> Option<&EnvType> {
         self.user.get(name)
     }
-    fn get_os_env(self: &Self, name: &str) -> Option<&EnvType> {
+    pub fn get_os_env(self: &Self, name: &str) -> Option<&EnvType> {
         self.os.get(name)
     }
 
