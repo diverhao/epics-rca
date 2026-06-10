@@ -8,6 +8,8 @@ use ::log::info;
 use core::net::{IpAddr, SocketAddr};
 use tokio::net::UdpSocket;
 
+pub const MAX_UDP_SEND: usize = 1024;
+
 #[repr(u16)]
 #[derive(Copy, Clone, Debug)]
 pub enum CaCmd {
@@ -207,7 +209,7 @@ impl UDP {
 
     // -------------- network ----------------------
     /**
-     * Send one UDP message to hosts defined in EPICS_CA_ADDR_LIST
+     * Send one UDP message to all hosts defined in EPICS_CA_ADDR_LIST
      */
     pub async fn send_ca(
         self: &Self,
@@ -218,10 +220,11 @@ impl UDP {
         param2: u32,
         mut payload: Vec<u8>,
     ) {
-        // set payload size
+        // patch payload
         let padding = (8 - payload.len() % 8) % 8;
         payload.resize(payload.len() + padding, 0);
 
+        // make sure the payload size fits in u32 data
         let payload_size: u32 = if let Ok(payload_size) = payload.len().try_into() {
             payload_size
         } else {
@@ -231,25 +234,42 @@ impl UDP {
 
         // create header buffer
         let mut buf =
-            UDP::create_ca_header(cmd, payload_size, data_type, data_count, param1, param2);
+            UDP::build_ca_header(cmd, payload_size, data_type, data_count, param1, param2);
+
         // combine header and payload
         buf.extend_from_slice(&payload);
 
         // send to addresses in EPICS_CA_ADDR_LIST
         for socket_addr in self.ca_addr_list() {
-            info!("Sending UDP data to {:?}", socket_addr);
+            debug!("Sending UDP data to {:?}", socket_addr);
             match socket_addr {
                 SocketAddr::V4(_) => {
-                    self.socket_v4().send_to(&buf, socket_addr).await;
+                    let sent = self.socket_v4().send_to(&buf, socket_addr).await;
+                    match sent {
+                        Ok(bytes) => {
+                            debug!("Sent out {} bytes of UDP data to {:?}", bytes, socket_addr);
+                        }
+                        Err(err) => {
+                            error!("Failed to send UDP data to {:?}: {}", socket_addr, err);
+                        }
+                    }
                 }
                 SocketAddr::V6(_) => {
-                    self.socket_v6().send_to(&buf, socket_addr).await;
+                    let sent = self.socket_v6().send_to(&buf, socket_addr).await;
+                    match sent {
+                        Ok(bytes) => {
+                            debug!("Sent out {} bytes of UDP data to {:?}", bytes, socket_addr);
+                        }
+                        Err(err) => {
+                            error!("Failed to send UDP data to {:?}: {}", socket_addr, err);
+                        }
+                    }
                 }
             }
         }
     }
 
-    fn create_ca_header(
+    fn build_ca_header(
         cmd: CaCmd,        // 2 bytes
         payload_size: u32, // up to 4 bytes
         data_type: u32,    // up to 4 bytes
@@ -259,7 +279,8 @@ impl UDP {
     ) -> Vec<u8> {
         let mut use_extended_header = false;
         // use extended header if payload size > 16368 bytes
-        if (payload_size > 0x3ff0) {
+        if payload_size > 0x3ff0 {
+            debug!("UDP payload size larger than 16368 bytes, use extended header");
             use_extended_header = true;
         }
 

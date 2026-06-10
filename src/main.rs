@@ -14,7 +14,7 @@ async fn main() {
             ("EPICS_CA_ADDR_LIST", "192.168.3.4"),
             ("EPICS_CA_AUTO_ADDR_LIST", "NO"),
         ],
-        LevelFilter::Info,
+        LevelFilter::Debug,
     )
     .await;
 
@@ -26,14 +26,10 @@ async fn main() {
         context.env().get_env_source("EPICS_CA_BEACON_PERIODaaa")
     );
 
-    context.udp().send_ca(
-        udp::udp::CaCmd::CaProtoVersion,
-        0,
-        0,
-        0,
-        0,
-        vec![],
-    ).await;
+    context
+        .udp()
+        .send_ca(udp::udp::CaCmd::CaProtoVersion, 0, 0, 0, 0, vec![])
+        .await;
 
     // let mut channel = channel::channel::Channel::new("ABCD");
     // println!("{}", channel);

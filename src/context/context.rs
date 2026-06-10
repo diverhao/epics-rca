@@ -4,9 +4,14 @@ use crate::udp::udp::UDP;
 use ::log::LevelFilter;
 use ::log::error;
 use ::log::info;
+use std::sync::Arc;
 use std::sync::Mutex;
 use std::sync::MutexGuard;
 use std::sync::OnceLock;
+
+use crate::channel::channels::Channels;
+
+pub const CA_MINOR_VERSION: usize = 13;
 
 /**
  * Global singleton Context storage.
@@ -15,14 +20,14 @@ use std::sync::OnceLock;
  * provides synchronized mutable access to the Context after it has been
  * created.
  */
-pub static CONTEXT: OnceLock<Mutex<Context>> = OnceLock::new();
+pub static CONTEXT: OnceLock<Arc<Context>> = OnceLock::new();
 
 pub struct Context {
     env: Env,
-    log_level: LevelFilter,
-    udp: UDP,
+    udp: Arc<UDP>,
     // placeholder
-    pub tcp: Option<i32>,
+    tcp: Option<i32>,
+    channels: Arc<Channels>,
 }
 /**
  * Access point for the client runtime state. Can be accessed by calling
@@ -51,12 +56,13 @@ impl Context {
         init_log(log_level);
         let env = Env::new(user_env);
         let udp = UDP::new(&env).await;
+        let channels = Channels::new();
 
         let context = Context {
             env,
-            log_level,
-            udp,
+            udp: Arc::new(udp),
             tcp: None,
+            channels: Arc::new(channels),
         };
 
         info!(
@@ -64,33 +70,25 @@ impl Context {
             context.env
         );
 
-        if CONTEXT.set(Mutex::new(context)).is_err() {
+        if CONTEXT.set(Arc::new(context)).is_err() {
             panic!("Failed to create Context. Quit epics-rca.");
         }
     }
 
     // -------------- getters and setters ----------------
 
-    pub fn set_log_level(&mut self, level: LevelFilter) {
-        self.log_level = level;
+    pub fn set_log_level(level: LevelFilter) {
         ::log::set_max_level(level);
     }
 
-    pub fn log_level(self: &Self) -> &LevelFilter {
-        &self.log_level
+    pub fn log_level() -> LevelFilter {
+        ::log::max_level()
     }
 
-    pub fn udp(self: &Self) -> &UDP {
-        &self.udp
+    pub fn udp(self: &Self) -> Arc<UDP> {
+        Arc::clone(&self.udp)
     }
 
-    pub fn udp_mut(self: &mut Self) -> &mut UDP {
-        &mut self.udp
-    }
-
-    /**
-     * Env is not mutable
-     */
     pub fn env(self: &Self) -> &Env {
         &self.env
     }
@@ -120,10 +118,6 @@ pub async fn create_context(user_env: Vec<(&str, &str)>, log_level: LevelFilter)
  *
  * Panics if the Context has not been created or if the mutex is poisoned.
  */
-pub fn get_context() -> MutexGuard<'static, Context> {
-    CONTEXT
-        .get()
-        .expect("context has not been created")
-        .lock()
-        .expect("context mutex is poisoned")
+pub fn get_context() -> Arc<Context> {
+    Arc::clone(CONTEXT.get().expect("context has not been created"))
 }
