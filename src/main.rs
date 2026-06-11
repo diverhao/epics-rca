@@ -1,3 +1,4 @@
+mod ca;
 mod channel;
 mod context;
 mod env;
@@ -26,13 +27,6 @@ async fn main() {
         context.env().get_env_source("EPICS_CA_BEACON_PERIODaaa")
     );
 
-    context
-        .udp()
-        .send_ca(udp::udp::CaCmd::CaProtoVersion, 0, 0, 0, 0, vec![])
-        .await;
-
-    // let mut channel = channel::channel::Channel::new("ABCD");
-    // println!("{}", channel);
-    // channel.name = "AAAA".to_string();
-    // println!("{:?}", context.env.get_env("EPICS_CA_ADDR_LIST"));
+    context.create_channel("val1");
+    context.channels().search_ca().await;
 }

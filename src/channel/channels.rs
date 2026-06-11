@@ -1,18 +1,14 @@
+use log::debug;
+
+use crate::ca::message::{MAX_UDP_SEND, build_name_search_buf_ca};
 use crate::channel::channel::ChannelState;
-use crate::context::context::CA_MINOR_VERSION;
-use crate::udp::udp::CaCmd;
-use crate::{channel::channel::Channel, context::context::get_context, udp::udp::MAX_UDP_SEND};
+use crate::{channel::channel::Channel, context::context::get_context};
 use std::collections::HashMap;
 use std::sync::Arc;
 use std::sync::RwLock;
 use std::sync::RwLockReadGuard;
 use std::sync::RwLockWriteGuard;
 use std::sync::atomic::{AtomicU32, Ordering};
-
-enum SearchReplyFlag {
-    DoReply = 0x0a,
-    DontReply = 0x05,
-}
 
 pub struct Channels {
     by_name: RwLock<HashMap<String, Arc<Channel>>>,
@@ -43,53 +39,43 @@ impl Channels {
         channel
     }
 
+    // todo: remove channel
+
     // --------------- network -----------------
 
-    /**
-     * Build Channel Access name search payload for CA_PROTO_SEARCH
-     */
-    fn build_search_buf_ca(self: &Self) -> Vec<Vec<u8>> {
-        let mut payloads: Vec<Vec<u8>> = vec![];
-        let mut payload: Vec<u8> = vec![];
-        let by_name = self.by_name();
-
-        for (name, channel) in by_name.iter() {
-            if channel.state() != ChannelState::NeverConnected
-                && channel.state() != ChannelState::NameSearching
-            {
-                continue;
-            }
-            let name_bytes = name.as_bytes();
-            if payload.len() + name_bytes.len() + 16 > MAX_UDP_SEND {
-                payloads.push(payload.clone());
-                payload.clear();
-            }
-            payload.extend_from_slice(name_bytes);
-            payload.push(0);
-        }
-
-        // push the final non-empty payload
-        if !payload.is_empty() {
-            payloads.push(payload);
-        }
-
-        payloads
-    }
-
     pub async fn search_ca(self: &Self) {
-        let payloads = self.build_search_payloads_ca();
+        let channels: Vec<Arc<Channel>> = self.by_cid().values().cloned().collect();
         let context = get_context();
         let udp = context.udp();
-        for payload in payloads {
-            udp.send_ca(
-                CaCmd::CaProtoSearch,
-                SearchReplyFlag::DontReply as u32,
-                CA_MINOR_VERSION as u32,
-                1,
-                1,
-                payload,
-            )
-            .await;
+        let mut buf_full: Vec<u8> = vec![];
+
+        for channel in channels {
+            let name = channel.name();
+            let cid = channel.cid();
+            let channel_state = channel.state();
+            if channel_state != ChannelState::NeverConnected
+                && channel_state != ChannelState::NameSearching
+            {
+                debug!("Channel {name} is already found, skip name search");
+                continue;
+            }
+            debug!("Searching {name}");
+            let buf = build_name_search_buf_ca(name, cid);
+            match buf {
+                Some(buf) => {
+                    if !buf_full.is_empty() && buf.len() + buf_full.len() > MAX_UDP_SEND {
+                        udp.send(&buf_full).await;
+                        buf_full.clear();
+                    }
+                    buf_full.extend_from_slice(&buf);
+                }
+                None => {}
+            }
+        }
+
+        // send non-empty residual
+        if !buf_full.is_empty() {
+            udp.send(&buf_full).await;
         }
     }
 

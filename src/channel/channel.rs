@@ -1,7 +1,4 @@
-use std::sync::RwLock;
-use std::sync::RwLockReadGuard;
-use std::sync::RwLockWriteGuard;
-use std::sync::atomic::{AtomicU32, Ordering};
+use std::sync::{RwLock, RwLockReadGuard, RwLockWriteGuard};
 
 #[derive(Copy, Clone, Debug, PartialEq)]
 pub enum ChannelState {
@@ -190,13 +187,6 @@ impl Channel {
             }),
         }
     }
-
-    // ------------ search -------------
-
-    /**
-     * Search the channel via UDP
-     */
-    pub fn search() {}
 
     // ------------------ data -------------------
     pub fn name(&self) -> &str {

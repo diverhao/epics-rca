@@ -5,13 +5,10 @@ use ::log::LevelFilter;
 use ::log::error;
 use ::log::info;
 use std::sync::Arc;
-use std::sync::Mutex;
-use std::sync::MutexGuard;
 use std::sync::OnceLock;
 
+use crate::channel::channel::Channel;
 use crate::channel::channels::Channels;
-
-pub const CA_MINOR_VERSION: usize = 13;
 
 /**
  * Global singleton Context storage.
@@ -75,6 +72,13 @@ impl Context {
         }
     }
 
+    // -------------- channel ----------------------------
+
+    pub fn create_channel(self: &Self, name: &str) -> Arc<Channel> {
+        let channels = self.channels();
+        channels.create_channel(name)
+    }
+
     // -------------- getters and setters ----------------
 
     pub fn set_log_level(level: LevelFilter) {
@@ -91,6 +95,10 @@ impl Context {
 
     pub fn env(self: &Self) -> &Env {
         &self.env
+    }
+
+    pub fn channels(self: &Self) -> Arc<Channels> {
+        Arc::clone(&self.channels)
     }
 }
 

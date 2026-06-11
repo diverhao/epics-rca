@@ -1,5 +1,3 @@
-use crate::channel::channel::DbrType;
-use crate::context::context::get_context;
 use crate::env::env::Env;
 use crate::env::env::EnvType;
 use ::log::debug;
@@ -7,8 +5,6 @@ use ::log::error;
 use ::log::info;
 use core::net::{IpAddr, SocketAddr};
 use tokio::net::UdpSocket;
-
-pub const MAX_UDP_SEND: usize = 1024;
 
 #[repr(u16)]
 #[derive(Copy, Clone, Debug)]
@@ -208,43 +204,14 @@ impl UDP {
     }
 
     // -------------- network ----------------------
-    /**
-     * Send one UDP message to all hosts defined in EPICS_CA_ADDR_LIST
-     */
-    pub async fn send_ca(
-        self: &Self,
-        cmd: CaCmd,
-        data_type: u32,
-        data_count: u32,
-        param1: u32,
-        param2: u32,
-        mut payload: Vec<u8>,
-    ) {
-        // patch payload
-        let padding = (8 - payload.len() % 8) % 8;
-        payload.resize(payload.len() + padding, 0);
 
-        // make sure the payload size fits in u32 data
-        let payload_size: u32 = if let Ok(payload_size) = payload.len().try_into() {
-            payload_size
-        } else {
-            error!("Payload size too large");
-            return;
-        };
-
-        // create header buffer
-        let mut buf =
-            UDP::build_ca_header(cmd, payload_size, data_type, data_count, param1, param2);
-
-        // combine header and payload
-        buf.extend_from_slice(&payload);
-
+    pub async fn send(self: &Self, buf: &Vec<u8>) {
         // send to addresses in EPICS_CA_ADDR_LIST
         for socket_addr in self.ca_addr_list() {
             debug!("Sending UDP data to {:?}", socket_addr);
             match socket_addr {
                 SocketAddr::V4(_) => {
-                    let sent = self.socket_v4().send_to(&buf, socket_addr).await;
+                    let sent = self.socket_v4().send_to(buf, socket_addr).await;
                     match sent {
                         Ok(bytes) => {
                             debug!("Sent out {} bytes of UDP data to {:?}", bytes, socket_addr);
@@ -255,7 +222,7 @@ impl UDP {
                     }
                 }
                 SocketAddr::V6(_) => {
-                    let sent = self.socket_v6().send_to(&buf, socket_addr).await;
+                    let sent = self.socket_v6().send_to(buf, socket_addr).await;
                     match sent {
                         Ok(bytes) => {
                             debug!("Sent out {} bytes of UDP data to {:?}", bytes, socket_addr);
@@ -266,44 +233,6 @@ impl UDP {
                     }
                 }
             }
-        }
-    }
-
-    fn build_ca_header(
-        cmd: CaCmd,        // 2 bytes
-        payload_size: u32, // up to 4 bytes
-        data_type: u32,    // up to 4 bytes
-        data_count: u32,
-        param1: u32,
-        param2: u32,
-    ) -> Vec<u8> {
-        let mut use_extended_header = false;
-        // use extended header if payload size > 16368 bytes
-        if payload_size > 0x3ff0 {
-            debug!("UDP payload size larger than 16368 bytes, use extended header");
-            use_extended_header = true;
-        }
-
-        if use_extended_header {
-            let mut buf: Vec<u8> = Vec::with_capacity(16);
-            buf.extend_from_slice(&(cmd as u16).to_be_bytes());
-            buf.extend_from_slice(&(payload_size as u16).to_be_bytes());
-            buf.extend_from_slice(&(data_type as u16).to_be_bytes()); // 2 bytes
-            buf.extend_from_slice(&(data_count as u16).to_be_bytes()); // 2 bytes
-            buf.extend_from_slice(&param1.to_be_bytes());
-            buf.extend_from_slice(&param2.to_be_bytes());
-            buf
-        } else {
-            let mut buf: Vec<u8> = Vec::with_capacity(24);
-            buf.extend_from_slice(&(cmd as u16).to_be_bytes());
-            buf.extend_from_slice(&(0xffff as u16).to_be_bytes());
-            buf.extend_from_slice(&(data_type as u16).to_be_bytes());
-            buf.extend_from_slice(&(0x0000 as u16).to_be_bytes());
-            buf.extend_from_slice(&param1.to_be_bytes());
-            buf.extend_from_slice(&param2.to_be_bytes());
-            buf.extend_from_slice(&payload_size.to_be_bytes());
-            buf.extend_from_slice(&data_count.to_be_bytes());
-            buf
         }
     }
 
