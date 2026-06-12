@@ -79,6 +79,16 @@ impl Context {
         channels.create_channel(name)
     }
 
+    pub fn create_channels(self: &Self, names: Vec<String>) {
+        let channels = self.channels();
+        channels.create_channels(names)
+    }
+
+    pub async fn search_ca(self: &Self) {
+        let channels = self.channels();
+        channels.search_ca().await;
+    }
+
     // -------------- getters and setters ----------------
 
     pub fn set_log_level(level: LevelFilter) {

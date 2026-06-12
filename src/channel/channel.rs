@@ -193,11 +193,11 @@ impl Channel {
         &self.name
     }
 
-    pub fn data(&self) -> RwLockReadGuard<'_, ChannelData> {
+    fn data(&self) -> RwLockReadGuard<'_, ChannelData> {
         self.data.read().unwrap()
     }
 
-    pub fn data_mut(&self) -> RwLockWriteGuard<'_, ChannelData> {
+    fn data_mut(&self) -> RwLockWriteGuard<'_, ChannelData> {
         self.data.write().unwrap()
     }
 
