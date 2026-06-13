@@ -1,5 +1,6 @@
 use crate::ca::message::{CaHeader, MAX_UDP_SEND};
 use crate::env::env::Env;
+use crate::ca::message::decode_ca;
 use crate::udp::addr_list::parse_ca_pva_addr_list;
 use ::log::debug;
 use ::log::error;
@@ -60,20 +61,27 @@ impl UDP {
     pub fn start_to_listen(self: Arc<Self>) {
         let socket_v4 = Arc::clone(self.socket_v4());
         let socket_v6 = Arc::clone(self.socket_v6());
+        let udp_v4 = Arc::clone(&self);
+        let udp_v6 = Arc::clone(&self);
         tokio::spawn(async move {
             let mut buf = [0_u8; MAX_UDP_SEND];
             loop {
                 match socket_v4.recv_from(&mut buf).await {
                     Ok((size, remote_socket)) => {
-                        self.decode_ca(&buf[..size]);
+                        decode_ca(Arc::clone(&udp_v4), &buf[..size]);
                     }
                     Err(err) => {
                         error!("Error receving UDP, {:?}", err);
                     }
                 }
+            }
+        });
+        tokio::spawn(async move {
+            let mut buf = [0_u8; MAX_UDP_SEND];
+            loop {
                 match socket_v6.recv_from(&mut buf).await {
                     Ok((size, remote_socket)) => {
-                        self.decode_ca(&buf[..size]);
+                        decode_ca(Arc::clone(&udp_v6), &buf[..size]);
                     }
                     Err(err) => {
                         error!("Error receving UDP, {:?}", err);
@@ -83,45 +91,45 @@ impl UDP {
         });
     }
 
-    pub fn decode_ca(self: &Self, buf_raw: &[u8]) {
-        {
-            let mut buf_mut = self.buf_mut();
-            buf_mut.extend_from_slice(buf_raw);
-        }
+    // pub fn decode_ca(self: &Self, buf_raw: &[u8]) {
+    //     {
+    //         let mut buf_mut = self.buf_mut();
+    //         buf_mut.extend_from_slice(buf_raw);
+    //     }
 
-        loop {
-            let msg_len = {
-                let buf = self.buf();
-                match CaHeader::decode(&buf) {
-                    Ok(ca_header) => {
-                        let payload_size = ca_header.payload_size;
-                        let msg_len = if ca_header.is_extended() {
-                            24 + payload_size
-                        } else {
-                            16 + payload_size
-                        };
-                        if msg_len > buf.len() as u32 {
-                            None
-                        } else {
-                            Some(msg_len)
-                        }
-                    }
-                    Err(_) => None,
-                }
-            };
+    //     loop {
+    //         let msg_len = {
+    //             let buf = self.buf();
+    //             match CaHeader::decode(&buf) {
+    //                 Ok(ca_header) => {
+    //                     let payload_size = ca_header.payload_size;
+    //                     let msg_len = if ca_header.is_extended() {
+    //                         24 + payload_size
+    //                     } else {
+    //                         16 + payload_size
+    //                     };
+    //                     if msg_len > buf.len() as u32 {
+    //                         None
+    //                     } else {
+    //                         Some(msg_len)
+    //                     }
+    //                 }
+    //                 Err(_) => None,
+    //             }
+    //         };
 
-            if let Some(msg_len) = msg_len {
-                // todo: parse message len
-                // consume the message buffer
-                let mut buf_mut = self.buf_mut();
-                println!("{:?}", buf_mut);
-                buf_mut.drain(..(msg_len as usize));
+    //         if let Some(msg_len) = msg_len {
+    //             // todo: parse message len
+    //             // consume the message buffer
+    //             let mut buf_mut = self.buf_mut();
+    //             println!("{:?}", buf_mut);
+    //             buf_mut.drain(..(msg_len as usize));
 
-            } else {
-                break;
-            }
-        }
-    }
+    //         } else {
+    //             break;
+    //         }
+    //     }
+    // }
 
     // -------------- network ----------------------
 

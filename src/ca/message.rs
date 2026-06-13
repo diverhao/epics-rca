@@ -1,5 +1,6 @@
 use crate::ca::ca_cmd::CaCmd;
 use crate::context::context::get_context;
+use crate::udp::udp::UDP;
 use ::log::debug;
 use ::log::error;
 use std::sync::{Arc, RwLock, RwLockReadGuard, RwLockWriteGuard};
@@ -90,15 +91,20 @@ impl CaHeader {
      * Decode Channel Access UDP message
      */
     pub fn decode(buf: &RwLockReadGuard<Vec<u8>>) -> Result<CaHeader, String> {
-        if buf.len() < 16 {
-            return Err(String::from("Remaining buffer too short"));
+        let mut header_size: u32 = 16;
+
+        if buf.len() < header_size as usize {
+            return Err(String::from("Warning: Remaining buffer too short"));
         }
 
         let extended_header = buf[2] == 0xff && buf[3] == 0xff;
 
         if extended_header {
-            if buf.len() < 24 {
-                return Err(String::from("Remaining buffer too short for an extended header"));
+            header_size = 24;
+            if buf.len() < header_size as usize {
+                return Err(String::from(
+                    "Warning: Remaining buffer too short for an extended header",
+                ));
             }
         }
 
@@ -120,21 +126,31 @@ impl CaHeader {
             )
         };
 
-        match CaCmd::try_from(cmd) {
-            Ok(cmd) => Ok(CaHeader {
-                cmd,
-                payload_size,
-                data_type,
-                data_count,
-                param1,
-                param2,
-            }),
-            Err(_) => Err(String::from("Failed to decode header")),
+        if header_size + payload_size > buf.len() as u32 {
+            Err(String::from(
+                "Warning: Remaining buffer too short for header and payload",
+            ))
+        } else {
+            match CaCmd::try_from(cmd) {
+                Ok(cmd) => Ok(CaHeader {
+                    cmd,
+                    payload_size,
+                    data_type,
+                    data_count,
+                    param1,
+                    param2,
+                }),
+                Err(_) => Err(String::from("Error: Failed to decode header")),
+            }
         }
     }
 
-    pub fn is_extended(self: &Self) -> bool {
+    fn is_extended(self: &Self) -> bool {
         self.payload_size > 0x3ff0
+    }
+
+    pub fn size(self: &Self) -> u32 {
+        if self.is_extended() { 24 } else { 16 }
     }
 }
 
@@ -175,40 +191,48 @@ pub fn build_version_buf() -> Vec<u8> {
     .encode()
 }
 
-pub fn decode_udp_ca(buf: &[u8; MAX_UDP_SEND]) {
-    let context = get_context();
-    let udp = context.udp();
+pub fn decode_ca(udp: Arc<UDP>, buf_raw: &[u8]) {
     {
         let mut buf_mut = udp.buf_mut();
-        buf_mut.extend_from_slice(buf);
+        buf_mut.extend_from_slice(buf_raw);
     }
-    let mut offset: u32 = 0;
-    let buf = udp.buf();
 
     loop {
-        match CaHeader::decode(&buf) {
-            Ok(ca_header) => {
-                let payload_size = ca_header.payload_size;
-                // todo: parse the payload, may invole the asyn
+        // determine the Channel Access message size
+        let msg_data = {
+            let buf = udp.buf();
+            match CaHeader::decode(&buf) {
+                Ok(ca_header) => {
+                    // everything is OK
+                    let header_size = ca_header.size();
+                    let payload_size = ca_header.payload_size;
+                    let msg_len = header_size + payload_size;
+                    let payload = buf[header_size as usize..msg_len as usize].to_vec();
+                    Ok((ca_header, payload))
+                }
+                Err(reason) => {
+                    if reason.starts_with("Error") {
+                        // something wrong with the buffer data, clear the buffer
+                        Err(String::from("Error"))
+                    } else {
+                        // the remaining buffer is not long enough, stop decoding
+                        return;
+                    }
+                }
+            }
+        };
 
-                // trim buf
-                if ca_header.is_extended() {
-                    offset = payload_size + 24 + payload_size;
-                } else {
-                    offset = payload_size + 16 + payload_size;
-                }
-                if offset >= buf.len().try_into().unwrap() {
-                    return;
-                } else {
-                    // consume the data
-                    let mut buf_mut = udp.buf_mut();
-                    buf_mut.drain(..(offset as usize));
-                }
+        if let Ok((ca_header, payload)) = msg_data {
+            // consume the message buffer
+            {
+                let mut buf_mut = udp.buf_mut();
+                buf_mut.drain(..ca_header.size() as usize + payload.len());
             }
-            Err(_) => {
-                // disgard remaining data in buf
-                break;
-            }
+            // todo parse the message using ca_header and payload
+        } else {
+            let mut buf_mut = udp.buf_mut();
+            buf_mut.clear();
+            return;
         }
     }
 }
