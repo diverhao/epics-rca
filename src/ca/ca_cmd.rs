@@ -1,4 +1,3 @@
-
 #[repr(u16)]
 #[derive(Copy, Clone, Debug)]
 pub enum CaCmd {

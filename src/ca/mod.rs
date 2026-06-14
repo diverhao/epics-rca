@@ -1,2 +1,2 @@
-pub mod message;
 pub mod ca_cmd;
+pub mod message;

@@ -36,6 +36,12 @@ pub async fn send_ver_ca() {
     udp.send(&buf).await;
 }
 
+#[derive(Copy, Clone)]
+pub enum CaSrc {
+    Client,
+    Server,
+}
+
 pub struct CaHeader {
     pub cmd: CaCmd,
     pub payload_size: u32, // or 2 bytes
@@ -43,19 +49,160 @@ pub struct CaHeader {
     pub data_count: u32, // or 2 bytes
     pub param1: u32,
     pub param2: u32,
+    pub src: CaSrc,
+}
+
+impl std::fmt::Display for CaSrc {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(match self {
+            Self::Client => "client",
+            Self::Server => "server",
+        })
+    }
 }
 
 impl std::fmt::Display for CaHeader {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(
-            f,
-            "CaHeader {{ cmd: {}, payload_size: {}, data_type: {}, data_count: {}, param1: {}, param2: {} }}",
-            self.cmd, self.payload_size, self.data_type, self.data_count, self.param1, self.param2
-        )
+        let [payload_size, data_type, data_count, param1, param2] = self.field_names();
+
+        writeln!(f, "\nMessage header:")?;
+        writeln!(f, "  {:<14}: {}", "src", self.src)?;
+        writeln!(f, "  {:<14}: {}", "cmd", self.cmd)?;
+        writeln!(f, "  {:<14}: {}", payload_size, self.payload_size)?;
+        writeln!(f, "  {:<14}: {}", data_type, self.data_type)?;
+        writeln!(f, "  {:<14}: {}", data_count, self.data_count)?;
+        writeln!(f, "  {:<14}: {}", param1, self.param1)?;
+        writeln!(f, "  {:<14}: {}", param2, self.param2)?;
+        write!(f, "")
     }
 }
 
 impl CaHeader {
+    fn field_names(&self) -> [&'static str; 5] {
+        use CaCmd::*;
+        use CaSrc::*;
+
+        match (self.cmd, self.src) {
+            (CaProtoVersion, Client) => [
+                "Payload Size",
+                "Priority",
+                "Version",
+                "Reserved",
+                "Reserved",
+            ],
+            (CaProtoVersion, Server) => ["Reserved", "Priority", "Version", "Reserved", "Reserved"],
+            (CaProtoSearch, Client) => ["Payload Size", "Reply", "Version", "SearchID", "SearchID"],
+            (CaProtoSearch, Server) => [
+                "Payload Size",
+                "TCP Port",
+                "Data Count",
+                "SID or IP",
+                "SearchID",
+            ],
+            (CaProtoNotFound, _) => ["Reserved", "Reply Flag", "Version", "SearchID", "SearchID"],
+            (CaProtoEcho, _) => ["Reserved", "Reserved", "Reserved", "Reserved", "Reserved"],
+            (CaProtoRsrvIsUp, _) => ["Reserved", "Version", "Server Port", "BeaconID", "Address"],
+            (CaRepeaterConfirm, _) => [
+                "Reserved",
+                "Reserved",
+                "Reserved",
+                "Reserved",
+                "Repeater Address",
+            ],
+            (CaRepeaterRegister, _) => [
+                "Reserved",
+                "Reserved",
+                "Reserved",
+                "Reserved",
+                "Client IP Address",
+            ],
+            (CaProtoEventAdd, Client) => [
+                "Payload Size",
+                "Data Type",
+                "Data Count",
+                "SID",
+                "SubscriptionID",
+            ],
+            (CaProtoEventAdd, Server) => [
+                "Payload Size",
+                "Data Type",
+                "Data Count",
+                "SID",
+                "SubscriptionID",
+            ],
+            (CaProtoEventCancel, Client) => [
+                "Payload Size",
+                "Data Type",
+                "Data Count",
+                "SID",
+                "SubscriptionID",
+            ],
+            (CaProtoEventCancel, Server) => [
+                "Payload Size",
+                "Data Type",
+                "Data Count",
+                "SID",
+                "SubscriptionID",
+            ],
+            (CaProtoRead, Client) | (CaProtoReadNotify, Client) => {
+                ["Payload Size", "Data Type", "Data Count", "SID", "IOID"]
+            }
+            (CaProtoRead, Server) | (CaProtoReadNotify, Server) => {
+                ["Payload Size", "Data Type", "Data Count", "SID", "IOID"]
+            }
+            (CaProtoWrite, Client) | (CaProtoWriteNotify, Client) => {
+                ["Payload Size", "Data Type", "Data Count", "SID", "IOID"]
+            }
+            (CaProtoWriteNotify, Server) => {
+                ["Payload Size", "Data Type", "Data Count", "Status", "IOID"]
+            }
+            (CaProtoClearChannel, Client) => ["Payload Size", "Reserved", "Reserved", "SID", "CID"],
+            (CaProtoClearChannel, Server) => ["Payload Size", "Reserved", "Reserved", "SID", "CID"],
+            (CaProtoCreateChan, Client) => [
+                "Payload Size",
+                "Reserved",
+                "Reserved",
+                "CID",
+                "Client Version",
+            ],
+            (CaProtoCreateChan, Server) => {
+                ["Payload Size", "Data Type", "Data Count", "CID", "SID"]
+            }
+            (CaProtoClientName, _) => [
+                "Payload Size",
+                "Reserved",
+                "Reserved",
+                "Reserved",
+                "Reserved",
+            ],
+            (CaProtoHostName, _) => [
+                "Payload Size",
+                "Reserved",
+                "Reserved",
+                "Reserved",
+                "Reserved",
+            ],
+            (CaProtoAccessRights, _) => [
+                "Payload Size",
+                "Reserved",
+                "Reserved",
+                "CID",
+                "Access Rights",
+            ],
+            (CaProtoCreateChFail, _) => ["Payload Size", "Reserved", "Reserved", "CID", "Reserved"],
+            (CaProtoServerDisconn, _) => {
+                ["Payload Size", "Reserved", "Reserved", "CID", "Reserved"]
+            }
+            _ => [
+                "Payload Size",
+                "Data Type",
+                "Data Count",
+                "Parameter 1",
+                "Parameter 2",
+            ],
+        }
+    }
+
     fn encode(self: &Self) -> Vec<u8> {
         let mut use_extended_header = false;
         // use extended header if payload size > 16368 bytes
@@ -139,6 +286,7 @@ impl CaHeader {
                     data_count,
                     param1,
                     param2,
+                    src: CaSrc::Server,
                 }),
                 Err(_) => Err(String::from("Error: Failed to decode header")),
             }
@@ -163,16 +311,18 @@ pub fn build_name_search_buf(name: &str, cid: u32) -> Option<Vec<u8>> {
     pad_payload(&mut payload)?; // if payload too large, return None
 
     // build CA header
-    let mut buf = CaHeader {
+    let header = CaHeader {
         cmd: CaCmd::CaProtoSearch,
         payload_size: payload.len() as u32,
         data_type: SearchReplyFlag::DontReply as u16,
         data_count: CA_MINOR_VERSION as u32,
         param1: cid,
         param2: cid,
-    }
-    .encode();
+        src: CaSrc::Client,
+    };
+    debug!("{header}");
 
+    let mut buf = header.encode();
     // join header and payload
     buf.extend_from_slice(&payload);
 
@@ -180,17 +330,22 @@ pub fn build_name_search_buf(name: &str, cid: u32) -> Option<Vec<u8>> {
 }
 
 pub fn build_version_buf() -> Vec<u8> {
-    CaHeader {
+    let header = CaHeader {
         cmd: CaCmd::CaProtoVersion,
         payload_size: 0,
         data_type: 1,
         data_count: CA_MINOR_VERSION as u32,
         param1: 1,
         param2: 0,
-    }
-    .encode()
+        src: CaSrc::Client,
+    };
+    debug!("{header}");
+    header.encode()
 }
 
+/**
+ * Decode a Channel Access message
+ */
 pub fn decode_ca(udp: Arc<UDP>, buf_raw: &[u8]) {
     {
         let mut buf_mut = udp.buf_mut();
@@ -229,6 +384,7 @@ pub fn decode_ca(udp: Arc<UDP>, buf_raw: &[u8]) {
                 buf_mut.drain(..ca_header.size() as usize + payload.len());
             }
             // todo parse the message using ca_header and payload
+            debug!("{}", ca_header);
         } else {
             let mut buf_mut = udp.buf_mut();
             buf_mut.clear();
