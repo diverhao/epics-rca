@@ -5,6 +5,7 @@ mod channel;
 mod context;
 mod env;
 mod udp;
+mod tcp;
 
 use crate::context::context::create_context;
 use crate::context::context::get_context;

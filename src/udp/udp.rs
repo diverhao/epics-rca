@@ -14,7 +14,7 @@ pub struct UDP {
     socket_v6: Arc<UdpSocket>,
     ca_addr_list: Vec<SocketAddr>,
     pva_addr_list: Vec<SocketAddr>,
-    buf: RwLock<Vec<u8>>,
+    // buf: RwLock<Vec<u8>>,
 }
 
 impl UDP {
@@ -54,7 +54,7 @@ impl UDP {
             socket_v6,
             ca_addr_list,
             pva_addr_list,
-            buf: RwLock::new(vec![]),
+            // buf: RwLock::new(vec![]),
         }
     }
 
@@ -64,11 +64,13 @@ impl UDP {
         let udp_v4 = Arc::clone(&self);
         let udp_v6 = Arc::clone(&self);
         tokio::spawn(async move {
-            let mut buf = [0_u8; MAX_UDP_SEND];
+            let mut buf: Vec<u8> = vec![];
+            let mut buf_pending = [0_u8; MAX_UDP_SEND];
             loop {
-                match socket_v4.recv_from(&mut buf).await {
+                match socket_v4.recv_from(&mut buf_pending).await {
                     Ok((size, remote_socket)) => {
-                        decode_ca(Arc::clone(&udp_v4), &buf[..size]);
+                        buf.extend_from_slice(&buf_pending[..size]);
+                        decode_ca(&mut buf);
                     }
                     Err(err) => {
                         error!("Error receving UDP, {:?}", err);
@@ -77,11 +79,13 @@ impl UDP {
             }
         });
         tokio::spawn(async move {
-            let mut buf = [0_u8; MAX_UDP_SEND];
+            let mut buf: Vec<u8> = vec![];
+            let mut buf_pending = [0_u8; MAX_UDP_SEND];
             loop {
-                match socket_v6.recv_from(&mut buf).await {
+                match socket_v6.recv_from(&mut buf_pending).await {
                     Ok((size, remote_socket)) => {
-                        decode_ca(Arc::clone(&udp_v6), &buf[..size]);
+                        buf.extend_from_slice(&buf_pending[..size]);
+                        decode_ca(&mut buf);
                     }
                     Err(err) => {
                         error!("Error receving UDP, {:?}", err);
@@ -125,14 +129,6 @@ impl UDP {
     }
 
     // ----------------- getters -----------------
-
-    pub fn buf(&self) -> RwLockReadGuard<'_, Vec<u8>> {
-        self.buf.read().unwrap()
-    }
-
-    pub fn buf_mut(&self) -> RwLockWriteGuard<'_, Vec<u8>> {
-        self.buf.write().unwrap()
-    }
 
     pub fn port_v4(self: &Self) -> u16 {
         self.socket_v4().local_addr().unwrap().port()

@@ -237,7 +237,7 @@ impl CaHeader {
     /**
      * Decode Channel Access UDP message
      */
-    pub fn decode(buf: &RwLockReadGuard<Vec<u8>>) -> Result<CaHeader, String> {
+    pub fn decode(buf: &Vec<u8>) -> Result<CaHeader, String> {
         let mut header_size: u32 = 16;
 
         if buf.len() < header_size as usize {
@@ -346,17 +346,11 @@ pub fn build_version_buf() -> Vec<u8> {
 /**
  * Decode a Channel Access message
  */
-pub fn decode_ca(udp: Arc<UDP>, buf_raw: &[u8]) {
-    {
-        let mut buf_mut = udp.buf_mut();
-        buf_mut.extend_from_slice(buf_raw);
-    }
-
+pub fn decode_ca(buf: &mut Vec<u8>) {
     loop {
         // determine the Channel Access message size
         let msg_data = {
-            let buf = udp.buf();
-            match CaHeader::decode(&buf) {
+            match CaHeader::decode(buf) {
                 Ok(ca_header) => {
                     // everything is OK
                     let header_size = ca_header.size();
@@ -380,14 +374,13 @@ pub fn decode_ca(udp: Arc<UDP>, buf_raw: &[u8]) {
         if let Ok((ca_header, payload)) = msg_data {
             // consume the message buffer
             {
-                let mut buf_mut = udp.buf_mut();
-                buf_mut.drain(..ca_header.size() as usize + payload.len());
+                buf.drain(..(ca_header.size() as usize + payload.len()));
             }
             // todo parse the message using ca_header and payload
             debug!("{}", ca_header);
         } else {
-            let mut buf_mut = udp.buf_mut();
-            buf_mut.clear();
+            // something is wrong, clear the whole buffer
+            buf.clear();
             return;
         }
     }
