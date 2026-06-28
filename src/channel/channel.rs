@@ -8,9 +8,12 @@ use std::sync::{
 use tokio::sync::Notify;
 
 use crate::ca::message::CaMsg;
-use log::{debug, error, warn};
-use crate::channel::dbr::{ChannelSeverity, ChannelStatus, ChannelState, ChannelAccessRights};
+use crate::channel::dbr::{ChannelAccessRights, ChannelSeverity, ChannelState, ChannelStatus};
 use crate::channel::dbr::{DbrType, DbrValue};
+use log::{debug, error, warn};
+
+// channel monitor callback function
+pub type MonitorCallback = Arc<dyn Fn(&Channel) + Send + Sync + 'static>;
 
 struct ChannelMeta {
     // state
@@ -20,6 +23,7 @@ struct ChannelMeta {
     status: ChannelStatus,
     severity: ChannelSeverity,
     dbr_type_native: DbrType,
+    data_count_native: u32,
     // time
     seconds_since_epoch: i32, // the Unix time, not epics time
     nano_seconds: u32,
@@ -48,6 +52,7 @@ pub struct Channel {
     search_counter: AtomicU32,
     addr: RwLock<Option<SocketAddr>>,
     state_change_notifier: Notify,
+    monitor_callback: RwLock<Option<MonitorCallback>>,
 }
 
 impl std::fmt::Display for Channel {
@@ -91,6 +96,7 @@ impl Channel {
                 status: ChannelStatus::NoAlarm,
                 severity: ChannelSeverity::NoAlarm,
                 dbr_type_native: DbrType::Double,
+                data_count_native: 0,
                 seconds_since_epoch: 0,
                 nano_seconds: 0,
                 units: String::new(),
@@ -108,6 +114,7 @@ impl Channel {
             value: RwLock::new(None),
             addr: RwLock::new(None),
             state_change_notifier: Notify::new(),
+            monitor_callback: RwLock::new(None),
         }
     }
 
@@ -206,7 +213,7 @@ impl Channel {
 
     // ------------------ get/put/monitor --------------
 
-    pub async fn get(self: &Self, dbr_type: DbrType, data_count: u32) {
+    pub async fn get(self: &Self, dbr_type: Option<DbrType>, data_count: Option<u32>) {
         // block until state becomes Created
         self.wait_state_change(ChannelState::Created).await;
 
@@ -216,10 +223,24 @@ impl Channel {
         let ioid = context.channels().next_ioid();
         let dest = self.addr();
 
+        let dbr_type = {
+            match dbr_type {
+                Some(dbr_type) => dbr_type,
+                None => self.dbr_type_native(),
+            }
+        };
+
+        let data_count = {
+            match data_count {
+                Some(data_count) => data_count,
+                None => self.data_count_native(),
+            }
+        };
+
         match dest {
             Some(dest) => {
                 let msg = CaMsg::build_read_notify(dbr_type, data_count, sid, ioid, &vec![dest]);
-                let tcp = context.tcps().tcp(&dest);
+                let tcp: Option<Arc<crate::tcp::tcp::TCP>> = context.tcps().tcp(&dest);
                 match tcp {
                     Some(tcp) => {
                         let (tx, rx) = tokio::sync::oneshot::channel::<CaMsg>();
@@ -236,7 +257,7 @@ impl Channel {
                                 let dbr_type = DbrType::from_u16(dbr_type_num);
                                 match dbr_type {
                                     Some(dbr_type) => {
-                                        self.update_from_buf(msg.payload(), num_elem, dbr_type);
+                                        self.update_from_payload_buf(msg.payload(), num_elem, dbr_type);
                                     }
                                     None => {}
                                 }
@@ -247,6 +268,42 @@ impl Channel {
                     None => {}
                 }
                 // "blocks" until get the CA_PROTO_READ_NOTIFY reply
+            }
+            None => {}
+        }
+    }
+
+    pub async fn start_to_monitor(self: &Self, dbr_type: Option<DbrType>, data_count: Option<u32>, callback: Option<MonitorCallback>) {
+        // block until state becomes Created
+        self.wait_state_change(ChannelState::Created).await;
+
+        let dbr_type = match dbr_type {
+            Some(dbr_type) => dbr_type,
+            None => self.dbr_type_native(),
+        };
+
+        let data_count = match data_count {
+            Some(data_count) => data_count,
+            None => self.data_count_native(),
+        };
+
+        let sid = self.sid();
+        let subid = self.cid();
+        let dest = self.addr();
+        let context = get_context();
+
+        match dest {
+            Some(dest) => {
+                let msg: CaMsg = CaMsg::build_event_add(dbr_type, data_count, sid, subid, &vec![dest]);
+                let tcp: Option<Arc<crate::tcp::tcp::TCP>> = context.tcps().tcp(&dest);
+                match tcp {
+                    Some(tcp) => {
+                        self.set_monitor_callback(callback);
+                        // send out CA_PROTO_EVENT_ADD
+                        tcp.send_msgs(vec![msg]).await;
+                    }
+                    None => {}
+                }
             }
             None => {}
         }
@@ -273,9 +330,7 @@ impl Channel {
 
     pub fn set_state(&self, new_state: ChannelState) {
         self.meta_mut().state = new_state;
-        debug!("state change>>>>>>>>>>>>>>>>>>>>>>>>");
         self.state_change_notifier().notify_waiters();
-        debug!("state change>>>>>>>>>>>>>>>>>>>>>>>> 1");
     }
 
     pub fn set_status(&self, new_status: ChannelStatus) {
@@ -296,6 +351,10 @@ impl Channel {
 
     pub fn set_nano_seconds(&self, new_nano_seconds: u32) {
         self.meta_mut().nano_seconds = new_nano_seconds;
+    }
+
+    pub fn set_data_count_native(&self, data_count: u32) {
+        self.meta_mut().data_count_native = data_count;
     }
 
     pub fn set_units(&self, new_units: String) {
@@ -354,6 +413,11 @@ impl Channel {
         *self.value.write().unwrap() = new_value;
     }
 
+
+    pub fn set_monitor_callback(self: &Self, callback: Option<MonitorCallback>) {
+        *self.monitor_callback.write().unwrap() = callback;
+    }
+
     // ------------- data getter ----------------
 
     pub fn state(&self) -> ChannelState {
@@ -378,6 +442,10 @@ impl Channel {
 
     pub fn seconds_since_epoch(&self) -> i32 {
         self.meta().seconds_since_epoch
+    }
+
+    pub fn data_count_native(&self) -> u32 {
+        self.meta().data_count_native
     }
 
     pub fn nano_seconds(&self) -> u32 {
@@ -456,6 +524,10 @@ impl Channel {
         &self.state_change_notifier
     }
 
+    pub fn monitor_callback(self: &Self) -> RwLockReadGuard<'_, Option<MonitorCallback>> {
+        self.monitor_callback.read().unwrap()
+    }
+
     // ------------- event ----------------
     async fn wait_state_change(self: &Self, state: ChannelState) {
         loop {
@@ -469,4 +541,13 @@ impl Channel {
             }
         }
     }
+
+    pub fn call_monitor_callback(self: &Self) {
+        if let Some(callback) = self.monitor_callback().clone() {
+            callback(self);
+        } else {
+            // no callback
+        }
+    }
+
 }

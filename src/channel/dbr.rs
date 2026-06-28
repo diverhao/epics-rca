@@ -30,7 +30,6 @@ const DBR_CTRL_LONG_VALUE_OFFSET: u32 = 44;
 const DBR_CTRL_DOUBLE_VALUE_OFFSET: u32 = 80;
 const DBR_STSACK_STRING_VALUE_OFFSET: u32 = 8;
 
-
 #[derive(Copy, Clone, Debug, PartialEq)]
 pub enum ChannelState {
     NeverConnected, // initial state
@@ -279,9 +278,8 @@ impl DbrType {
     }
 }
 
-
 impl Channel {
-    pub fn update_from_buf(&self, buf: &Vec<u8>, num_elem: u32, typ: DbrType) {
+    pub fn update_from_payload_buf(&self, buf: &Vec<u8>, num_elem: u32, typ: DbrType) {
         // update Channel.meta
         match typ {
             DbrType::StsString
@@ -935,5 +933,182 @@ impl Channel {
         self.set_upper_warning_limit(buf[15] as i16);
         self.set_lower_warning_limit(buf[16] as i16);
         self.set_lower_alarm_limit(buf[17] as i16);
+    }
+
+    // ----------------- dbr type conversion -------
+    pub fn dbr_type_native_to_time(self: &Self) -> DbrType {
+        match self.dbr_type_native() {
+            DbrType::String
+            | DbrType::StsString
+            | DbrType::TimeString
+            | DbrType::GrString
+            | DbrType::CtrlString
+            | DbrType::StsAckString
+            | DbrType::ClassName => DbrType::TimeString,
+            DbrType::Short
+            | DbrType::StsShort
+            | DbrType::TimeShort
+            | DbrType::GrShort
+            | DbrType::CtrlShort => DbrType::TimeShort,
+            DbrType::Float
+            | DbrType::StsFloat
+            | DbrType::TimeFloat
+            | DbrType::GrFloat
+            | DbrType::CtrlFloat => DbrType::TimeFloat,
+            DbrType::Enum
+            | DbrType::StsEnum
+            | DbrType::TimeEnum
+            | DbrType::GrEnum
+            | DbrType::CtrlEnum
+            | DbrType::PutAckt
+            | DbrType::PutAcks => DbrType::TimeEnum,
+            DbrType::Char
+            | DbrType::StsChar
+            | DbrType::TimeChar
+            | DbrType::GrChar
+            | DbrType::CtrlChar => DbrType::TimeChar,
+            DbrType::Long
+            | DbrType::StsLong
+            | DbrType::TimeLong
+            | DbrType::GrLong
+            | DbrType::CtrlLong => DbrType::TimeLong,
+            DbrType::Double
+            | DbrType::StsDouble
+            | DbrType::TimeDouble
+            | DbrType::GrDouble
+            | DbrType::CtrlDouble => DbrType::TimeDouble,
+        }
+    }
+
+    pub fn dbr_type_native_to_sts(self: &Self) -> DbrType {
+        match self.dbr_type_native() {
+            DbrType::String
+            | DbrType::StsString
+            | DbrType::TimeString
+            | DbrType::GrString
+            | DbrType::CtrlString
+            | DbrType::StsAckString
+            | DbrType::ClassName => DbrType::StsString,
+            DbrType::Short
+            | DbrType::StsShort
+            | DbrType::TimeShort
+            | DbrType::GrShort
+            | DbrType::CtrlShort => DbrType::StsShort,
+            DbrType::Float
+            | DbrType::StsFloat
+            | DbrType::TimeFloat
+            | DbrType::GrFloat
+            | DbrType::CtrlFloat => DbrType::StsFloat,
+            DbrType::Enum
+            | DbrType::StsEnum
+            | DbrType::TimeEnum
+            | DbrType::GrEnum
+            | DbrType::CtrlEnum
+            | DbrType::PutAckt
+            | DbrType::PutAcks => DbrType::StsEnum,
+            DbrType::Char
+            | DbrType::StsChar
+            | DbrType::TimeChar
+            | DbrType::GrChar
+            | DbrType::CtrlChar => DbrType::StsChar,
+            DbrType::Long
+            | DbrType::StsLong
+            | DbrType::TimeLong
+            | DbrType::GrLong
+            | DbrType::CtrlLong => DbrType::StsLong,
+            DbrType::Double
+            | DbrType::StsDouble
+            | DbrType::TimeDouble
+            | DbrType::GrDouble
+            | DbrType::CtrlDouble => DbrType::StsDouble,
+        }
+    }
+
+    pub fn dbr_type_native_to_gr(self: &Self) -> DbrType {
+        match self.dbr_type_native() {
+            DbrType::String
+            | DbrType::StsString
+            | DbrType::TimeString
+            | DbrType::GrString
+            | DbrType::CtrlString
+            | DbrType::StsAckString
+            | DbrType::ClassName => DbrType::GrString,
+            DbrType::Short
+            | DbrType::StsShort
+            | DbrType::TimeShort
+            | DbrType::GrShort
+            | DbrType::CtrlShort => DbrType::GrShort,
+            DbrType::Float
+            | DbrType::StsFloat
+            | DbrType::TimeFloat
+            | DbrType::GrFloat
+            | DbrType::CtrlFloat => DbrType::GrFloat,
+            DbrType::Enum
+            | DbrType::StsEnum
+            | DbrType::TimeEnum
+            | DbrType::GrEnum
+            | DbrType::CtrlEnum
+            | DbrType::PutAckt
+            | DbrType::PutAcks => DbrType::GrEnum,
+            DbrType::Char
+            | DbrType::StsChar
+            | DbrType::TimeChar
+            | DbrType::GrChar
+            | DbrType::CtrlChar => DbrType::GrChar,
+            DbrType::Long
+            | DbrType::StsLong
+            | DbrType::TimeLong
+            | DbrType::GrLong
+            | DbrType::CtrlLong => DbrType::GrLong,
+            DbrType::Double
+            | DbrType::StsDouble
+            | DbrType::TimeDouble
+            | DbrType::GrDouble
+            | DbrType::CtrlDouble => DbrType::GrDouble,
+        }
+    }
+
+    pub fn dbr_type_native_to_ctrl(self: &Self) -> DbrType {
+        match self.dbr_type_native() {
+            DbrType::String
+            | DbrType::StsString
+            | DbrType::TimeString
+            | DbrType::GrString
+            | DbrType::CtrlString
+            | DbrType::StsAckString
+            | DbrType::ClassName => DbrType::CtrlString,
+            DbrType::Short
+            | DbrType::StsShort
+            | DbrType::TimeShort
+            | DbrType::GrShort
+            | DbrType::CtrlShort => DbrType::CtrlShort,
+            DbrType::Float
+            | DbrType::StsFloat
+            | DbrType::TimeFloat
+            | DbrType::GrFloat
+            | DbrType::CtrlFloat => DbrType::CtrlFloat,
+            DbrType::Enum
+            | DbrType::StsEnum
+            | DbrType::TimeEnum
+            | DbrType::GrEnum
+            | DbrType::CtrlEnum
+            | DbrType::PutAckt
+            | DbrType::PutAcks => DbrType::CtrlEnum,
+            DbrType::Char
+            | DbrType::StsChar
+            | DbrType::TimeChar
+            | DbrType::GrChar
+            | DbrType::CtrlChar => DbrType::CtrlChar,
+            DbrType::Long
+            | DbrType::StsLong
+            | DbrType::TimeLong
+            | DbrType::GrLong
+            | DbrType::CtrlLong => DbrType::CtrlLong,
+            DbrType::Double
+            | DbrType::StsDouble
+            | DbrType::TimeDouble
+            | DbrType::GrDouble
+            | DbrType::CtrlDouble => DbrType::CtrlDouble,
+        }
     }
 }

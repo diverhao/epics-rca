@@ -322,6 +322,33 @@ impl CaMsg {
         }
     }
 
+    pub fn build_event_add(
+        dbr_type: DbrType,
+        data_count: u32,
+        sid: u32,
+        subid: u32,
+        dest: &Vec<SocketAddr>,
+    ) -> CaMsg {
+        let dbr_type = dbr_type as u16;
+        let header = CaHeader {
+            cmd: CaCmd::CaProtoEventAdd,
+            payload_size: 16,
+            data_type: dbr_type,
+            data_count: data_count,
+            param1: sid,
+            param2: subid,
+        };
+        CaMsg {
+            header: header,
+            // only report value change
+            payload: vec![0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 0, 0],
+            src: None,
+            dest: dest.clone(),
+        }
+    }
+
+
+
     // -------------- getters --------------------
     pub fn header(self: &Self) -> &CaHeader {
         &self.header
