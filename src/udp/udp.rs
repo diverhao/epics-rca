@@ -1,5 +1,7 @@
-use crate::ca::message::decode_ca;
-use crate::ca::message::{CaHeader, MAX_UDP_SEND};
+use crate::ca::header::CaHeader;
+use crate::ca::message::CaMsg;
+use crate::ca::message::MAX_UDP_SEND;
+use crate::ca::message_handler::handle_udp_msgs;
 use crate::env::env::Env;
 use crate::udp::addr_list::parse_ca_pva_addr_list;
 use ::log::debug;
@@ -14,7 +16,6 @@ pub struct UDP {
     socket_v6: Arc<UdpSocket>,
     ca_addr_list: Vec<SocketAddr>,
     pva_addr_list: Vec<SocketAddr>,
-    // buf: RwLock<Vec<u8>>,
 }
 
 impl UDP {
@@ -54,7 +55,6 @@ impl UDP {
             socket_v6,
             ca_addr_list,
             pva_addr_list,
-            // buf: RwLock::new(vec![]),
         }
     }
 
@@ -70,7 +70,8 @@ impl UDP {
                 match socket_v4.recv_from(&mut buf_pending).await {
                     Ok((size, remote_socket)) => {
                         buf.extend_from_slice(&buf_pending[..size]);
-                        decode_ca(&mut buf);
+                        let msgs = CaMsg::from_buf(&mut buf, Some(remote_socket), vec![]);
+                        handle_udp_msgs(&remote_socket, &msgs).await;
                     }
                     Err(err) => {
                         error!("Error receving UDP, {:?}", err);
@@ -85,7 +86,8 @@ impl UDP {
                 match socket_v6.recv_from(&mut buf_pending).await {
                     Ok((size, remote_socket)) => {
                         buf.extend_from_slice(&buf_pending[..size]);
-                        decode_ca(&mut buf);
+                        let msgs = CaMsg::from_buf(&mut buf, Some(remote_socket), vec![]);
+                        handle_udp_msgs(&remote_socket, &msgs).await;
                     }
                     Err(err) => {
                         error!("Error receving UDP, {:?}", err);
@@ -97,16 +99,15 @@ impl UDP {
 
     // -------------- network ----------------------
 
-    pub async fn send(self: &Self, buf: &Vec<u8>) {
+    async fn send_buf(self: &Self, buf: &Vec<u8>) {
         // send to addresses in EPICS_CA_ADDR_LIST
         for socket_addr in self.ca_addr_list() {
-            debug!("Sending UDP data to {:?}", socket_addr);
             match socket_addr {
                 SocketAddr::V4(_) => {
                     let sent = self.socket_v4().send_to(buf, socket_addr).await;
                     match sent {
                         Ok(bytes) => {
-                            debug!("Sent out {} bytes of UDP data to {:?}", bytes, socket_addr);
+                            // debug!("Sent out {} bytes of UDP data to {:?}", bytes, socket_addr);
                         }
                         Err(err) => {
                             error!("Failed to send UDP data to {:?}: {}", socket_addr, err);
@@ -117,7 +118,7 @@ impl UDP {
                     let sent = self.socket_v6().send_to(buf, socket_addr).await;
                     match sent {
                         Ok(bytes) => {
-                            debug!("Sent out {} bytes of UDP data to {:?}", bytes, socket_addr);
+                            // debug!("Sent out {} bytes of UDP data to {:?}", bytes, socket_addr);
                         }
                         Err(err) => {
                             error!("Failed to send UDP data to {:?}: {}", socket_addr, err);
@@ -126,6 +127,19 @@ impl UDP {
                 }
             }
         }
+    }
+
+    pub async fn send_msgs(self: &Self, msgs: &Vec<CaMsg>) {
+        let mut buf: Vec<u8> = vec![];
+        for msg in msgs {
+            debug!("\nSending UDP message {msg}");
+            if buf.len() as u32 + msg.size() > MAX_UDP_SEND as u32 {
+                self.send_buf(&buf).await;
+                buf.clear();
+            }
+            buf.extend_from_slice(&msg.to_buf());
+        }
+        self.send_buf(&buf).await;
     }
 
     // ----------------- getters -----------------

@@ -1,8 +1,10 @@
 use log::{debug, warn};
 
-use crate::ca::message::{MAX_UDP_SEND, build_name_search_buf, build_version_buf};
+use crate::ca::message::{CaMsg, MAX_UDP_SEND};
 use crate::channel::channel::ChannelState;
+use crate::env::env::EnvType;
 use crate::{channel::channel::Channel, context::context::get_context};
+use std::char::MAX;
 use std::collections::HashMap;
 use std::fmt;
 use std::sync::Arc;
@@ -10,6 +12,7 @@ use std::sync::RwLock;
 use std::sync::RwLockReadGuard;
 use std::sync::RwLockWriteGuard;
 use std::sync::atomic::{AtomicU32, Ordering};
+use tokio::time::{self, Duration};
 
 pub struct Channels {
     by_name: RwLock<HashMap<String, Arc<Channel>>>,
@@ -58,7 +61,7 @@ impl Channels {
         let mut by_cid = self.by_cid_mut();
         by_name.insert(String::from(name), Arc::clone(&channel));
         by_cid.insert(id, Arc::clone(&channel));
-        debug!("Channel {name} created");
+        debug!("Channel {name} created with id {id}");
         channel
     }
 
@@ -73,11 +76,40 @@ impl Channels {
 
     // --------------- network -----------------
 
-    pub async fn search_ca(self: &Self) {
+    /**
+     * Start periodic task to search
+     */
+    pub fn start_search_ca(self: Arc<Self>) {
+        let min_search_period = get_context()
+            .env()
+            .get_env("EPICS_CA_MIN_SEARCH_PERIOD")
+            .and_then(|value| match value {
+                EnvType::Double(value) => Some(*value),
+                _ => None,
+            })
+            .unwrap_or(0.1); // default to 0.1 second
+
+        tokio::spawn(async move {
+            let mut interval = time::interval(Duration::from_secs_f64(min_search_period));
+
+            loop {
+                interval.tick().await;
+                self.search_ca().await;
+            }
+        });
+    }
+
+    /**
+     * send out name search packets for all unconnected channels
+     */
+    async fn search_ca(self: &Self) {
         let channels: Vec<Arc<Channel>> = self.by_cid().values().cloned().collect();
         let context = get_context();
         let udp = context.udp();
-        let mut buf_full: Vec<u8> = build_version_buf();
+
+        let mut msgs: Vec<CaMsg> = vec![];
+        msgs.push(CaMsg::build_version(udp.ca_addr_list()));
+        let mut buf_len: u32 = 16;
 
         for channel in channels {
             let name = channel.name();
@@ -89,22 +121,34 @@ impl Channels {
                 debug!("Channel {name} is already found, skip name search");
                 continue;
             }
+            let search_counter = channel.search_counter();
+            channel.increment_search_counter();
+            if !search_counter.is_power_of_two() {
+                debug!("Skip this search for {name} as search counter = {search_counter}");
+                continue;
+            }
             debug!("Searching {name}");
-            let buf = build_name_search_buf(name, cid);
-            match buf {
-                Some(buf) => {
-                    if buf.len() + buf_full.len() > MAX_UDP_SEND {
-                        udp.send(&buf_full).await;
-                        buf_full = build_version_buf();
+            let msg = CaMsg::build_name_search(name, cid, udp.ca_addr_list());
+
+            match msg {
+                Ok(msg) => {
+                    channel.set_state(ChannelState::NameSearching);
+                    if buf_len + msg.size() as u32 > MAX_UDP_SEND as u32 {
+                        udp.send_msgs(&msgs).await;
+                        msgs.clear();
+                        msgs.push(CaMsg::build_version(udp.ca_addr_list()));
+                        buf_len = 16;
                     }
-                    buf_full.extend_from_slice(&buf);
+                    msgs.push(msg);
                 }
-                None => {}
+                Err(_) => {
+                    // skip
+                }
             }
         }
-
-        // send residual
-        udp.send(&buf_full).await;
+        if msgs.len() > 1 {
+            udp.send_msgs(&msgs).await;
+        }
     }
 
     // ------------- getters --------------------

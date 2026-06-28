@@ -24,7 +24,7 @@ async fn main() {
 
     let context = get_context();
 
-    context.udp().start_to_listen();
+    // context.udp().start_to_listen();
 
     println!("{:?}", context.env().get_env("EPICS_CA_BEACON_PERIOD"));
     println!(
@@ -33,8 +33,8 @@ async fn main() {
     );
 
     context.create_channel("val1");
-    context.create_channel("val2afadsfsa");
-    context.search_ca().await;
+    // context.create_channel("val2afadsfsa");
+    context.start_search_ca().await;
     println!("{}", context.channels());
     tokio::signal::ctrl_c()
         .await

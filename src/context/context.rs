@@ -9,6 +9,7 @@ use std::sync::OnceLock;
 
 use crate::channel::channel::Channel;
 use crate::channel::channels::Channels;
+use crate::tcp::tcp::TCPs;
 
 /**
  * Global singleton Context storage.
@@ -22,8 +23,7 @@ pub static CONTEXT: OnceLock<Arc<Context>> = OnceLock::new();
 pub struct Context {
     env: Env,
     udp: Arc<UDP>,
-    // placeholder
-    tcp: Option<i32>,
+    tcps: Arc<TCPs>,
     channels: Arc<Channels>,
 }
 /**
@@ -52,13 +52,16 @@ impl Context {
 
         init_log(log_level);
         let env = Env::new(user_env);
-        let udp = UDP::new(&env).await;
+        let udp: Arc<UDP> = Arc::new(UDP::new(&env).await);
+        Arc::clone(&udp).start_to_listen();
+
         let channels = Channels::new();
+        let tcps = TCPs::new();
 
         let context = Context {
             env,
-            udp: Arc::new(udp),
-            tcp: None,
+            udp: Arc::clone(&udp),
+            tcps: Arc::new(tcps),
             channels: Arc::new(channels),
         };
 
@@ -84,9 +87,9 @@ impl Context {
         channels.create_channels(names)
     }
 
-    pub async fn search_ca(self: &Self) {
+    pub async fn start_search_ca(self: &Self) {
         let channels = self.channels();
-        channels.search_ca().await;
+        channels.start_search_ca();
     }
 
     // -------------- getters and setters ----------------
@@ -109,6 +112,10 @@ impl Context {
 
     pub fn channels(self: &Self) -> Arc<Channels> {
         Arc::clone(&self.channels)
+    }
+
+    pub fn tcps(self: &Self) -> Arc<TCPs> {
+        Arc::clone(&self.tcps)
     }
 }
 

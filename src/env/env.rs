@@ -257,6 +257,11 @@ impl Env {
             EnvSource::Default,
         );
         self.set(
+            "EPICS_CA_MIN_SEARCH_PERIOD",
+            EnvType::Double(1.0),
+            EnvSource::Default,
+        );
+        self.set(
             "EPICS_CA_NAME_SERVERS",
             EnvType::String("".to_string()),
             EnvSource::Default,
