@@ -71,7 +71,7 @@ impl UDP {
                     Ok((size, remote_socket)) => {
                         buf.extend_from_slice(&buf_pending[..size]);
                         let msgs = CaMsg::from_buf(&mut buf, Some(remote_socket), vec![]);
-                        handle_udp_msgs(&remote_socket, &msgs).await;
+                        handle_udp_msgs(&remote_socket, msgs).await;
                     }
                     Err(err) => {
                         error!("Error receving UDP, {:?}", err);
@@ -87,7 +87,7 @@ impl UDP {
                     Ok((size, remote_socket)) => {
                         buf.extend_from_slice(&buf_pending[..size]);
                         let msgs = CaMsg::from_buf(&mut buf, Some(remote_socket), vec![]);
-                        handle_udp_msgs(&remote_socket, &msgs).await;
+                        handle_udp_msgs(&remote_socket, msgs).await;
                     }
                     Err(err) => {
                         error!("Error receving UDP, {:?}", err);

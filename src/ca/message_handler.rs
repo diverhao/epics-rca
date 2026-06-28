@@ -2,7 +2,8 @@ use crate::ca::ca_cmd::CaCmd;
 use crate::ca::header::CaHeader;
 use crate::ca::message::{CA_MINOR_VERSION, CaMsg, SearchReplyFlag};
 use crate::channel;
-use crate::channel::channel::{ChannelAccessRights, ChannelState, DbrType};
+use crate::channel::dbr::{ChannelSeverity, ChannelStatus, ChannelState, ChannelAccessRights};
+use crate::channel::dbr::{DbrType, DbrValue};
 use crate::context::context::get_context;
 use crate::udp::udp::UDP;
 use ::log::debug;
@@ -15,22 +16,22 @@ use std::sync::{Arc, RwLock, RwLockReadGuard, RwLockWriteGuard};
 /**
  * Handle Channel Access messages
  */
-pub async fn handle_udp_msgs(src: &SocketAddr, msgs: &Vec<CaMsg>) {
-    for msg in msgs {
-        handle_tcp_msg(src, msg).await;
-    }
-}
-
-pub async fn handle_tcp_msgs(src: &SocketAddr, msgs: &Vec<CaMsg>) {
+pub async fn handle_udp_msgs(src: &SocketAddr, msgs: Vec<CaMsg>) {
     for msg in msgs {
         handle_udp_msg(src, msg).await;
     }
 }
 
-pub async fn handle_tcp_msg(src: &SocketAddr, msg: &CaMsg) {
-    let header = msg.header();
+pub async fn handle_tcp_msgs(src: &SocketAddr, msgs: Vec<CaMsg>) {
+    for msg in msgs {
+        handle_tcp_msg(src, msg).await;
+    }
+}
+
+pub async fn handle_udp_msg(src: &SocketAddr, msg: CaMsg) {
+    let cmd = msg.header().cmd;
     debug!("\nReceived from {src}: {msg}");
-    match header.cmd {
+    match cmd {
         CaCmd::CaProtoVersion => handle_ca_proto_version(msg),
         CaCmd::CaProtoSearch => handle_ca_proto_search(msg).await,
         CaCmd::CaProtoNotFound => handle_ca_proto_not_found(msg),
@@ -42,10 +43,10 @@ pub async fn handle_tcp_msg(src: &SocketAddr, msg: &CaMsg) {
     }
 }
 
-pub async fn handle_udp_msg(src: &SocketAddr, msg: &CaMsg) {
-    let header = msg.header();
+pub async fn handle_tcp_msg(src: &SocketAddr, msg: CaMsg) {
+    let cmd = msg.header().cmd;
     debug!("\nReceived from {src}: {msg}");
-    match header.cmd {
+    match cmd {
         CaCmd::CaProtoEventAdd => handle_ca_proto_event_add(msg),
         CaCmd::CaProtoEventCancel => handle_ca_proto_event_cancel(msg),
         CaCmd::CaProtoRead => handle_ca_proto_read(msg),
@@ -71,11 +72,11 @@ pub async fn handle_udp_msg(src: &SocketAddr, msg: &CaMsg) {
     }
 }
 
-fn handle_ca_proto_version(msg: &CaMsg) {
+fn handle_ca_proto_version(_msg: CaMsg) {
     // do nothing
 }
 
-pub async fn handle_ca_proto_search(msg: &CaMsg) {
+pub async fn handle_ca_proto_search(msg: CaMsg) {
     // find the channel from search id (cid)
     let src = msg.src();
     match src {
@@ -115,7 +116,7 @@ pub async fn handle_ca_proto_search(msg: &CaMsg) {
     }
 }
 
-fn handle_ca_proto_access_rights(msg: &CaMsg) {
+fn handle_ca_proto_access_rights(msg: CaMsg) {
     // get access right
     let access_right_raw = msg.header().param2;
     let access_right = match access_right_raw & 0x03 {
@@ -141,54 +142,15 @@ fn handle_ca_proto_access_rights(msg: &CaMsg) {
     }
 }
 
-fn handle_ca_proto_create_chan(msg: &CaMsg) {
+fn handle_ca_proto_create_chan(msg: CaMsg) {
     let header = msg.header();
-    let dbr_type = header.data_type;
-    let dbr_type = match dbr_type {
-        0 => DbrType::String,
-        1 => DbrType::Short,
-        2 => DbrType::Float,
-        3 => DbrType::Enum,
-        4 => DbrType::Char,
-        5 => DbrType::Long,
-        6 => DbrType::Double,
-        7 => DbrType::StsString,
-        8 => DbrType::StsShort,
-        9 => DbrType::StsFloat,
-        10 => DbrType::StsEnum,
-        11 => DbrType::StsChar,
-        12 => DbrType::StsLong,
-        13 => DbrType::StsDouble,
-        14 => DbrType::TimeString,
-        15 => DbrType::TimeShort,
-        16 => DbrType::TimeFloat,
-        17 => DbrType::TimeEnum,
-        18 => DbrType::TimeChar,
-        19 => DbrType::TimeLong,
-        20 => DbrType::TimeDouble,
-        21 => DbrType::GrString,
-        22 => DbrType::GrShort,
-        23 => DbrType::GrFloat,
-        24 => DbrType::GrEnum,
-        25 => DbrType::GrChar,
-        26 => DbrType::GrLong,
-        27 => DbrType::GrDouble,
-        28 => DbrType::CtrlString,
-        29 => DbrType::CtrlShort,
-        30 => DbrType::CtrlFloat,
-        31 => DbrType::CtrlEnum,
-        32 => DbrType::CtrlChar,
-        33 => DbrType::CtrlLong,
-        34 => DbrType::CtrlDouble,
-        35 => DbrType::PutAckt,
-        36 => DbrType::PutAcks,
-        37 => DbrType::StsAckString,
-        38 => DbrType::ClassName,
-        _ => return,
+    let Some(dbr_type) = DbrType::from_u16(header.data_type) else {
+        return;
     };
 
     // get channel
     let cid = msg.header().param1;
+    let sid = msg.header().param2;
     let context = get_context();
     let channels = context.channels();
     let channel = channels.channel_by_cid(cid);
@@ -199,6 +161,7 @@ fn handle_ca_proto_create_chan(msg: &CaMsg) {
                 error!("Channel must be at TcpConnected state for CA_PROTO_CREATE_CHAN");
                 return;
             }
+            channel.set_sid(sid);
             channel.set_state(ChannelState::Created);
             channel.set_dbr_type_native(dbr_type);
         }
@@ -206,50 +169,66 @@ fn handle_ca_proto_create_chan(msg: &CaMsg) {
     }
 }
 
-fn handle_ca_proto_not_found(msg: &CaMsg) {}
+fn handle_ca_proto_read_notify(msg: CaMsg) {
+    // tell the get() to proceed
+    let ioid = msg.header().param2;
+    let sid = msg.header().param1;
+    match get_context().channels().remove_io(ioid) {
+        Some((tx, cid)) => {
+            let channel = get_context().channels().channel_by_cid(cid);
+            match channel {
+                Some(channel) => {
+                    let _ = tx.send(msg);
+                }
+                None => {}
+            }
+        }
+        None => {}
+    }
+}
 
-fn handle_ca_proto_echo(msg: &CaMsg) {}
+fn handle_ca_proto_not_found(_msg: CaMsg) {}
 
-fn handle_ca_proto_rsrv_is_up(msg: &CaMsg) {}
+fn handle_ca_proto_echo(_msg: CaMsg) {}
 
-fn handle_ca_repeater_confirm(msg: &CaMsg) {}
+fn handle_ca_proto_rsrv_is_up(_msg: CaMsg) {}
 
-fn handle_ca_repeater_register(msg: &CaMsg) {}
+fn handle_ca_repeater_confirm(_msg: CaMsg) {}
 
-fn handle_ca_proto_event_add(msg: &CaMsg) {}
+fn handle_ca_repeater_register(_msg: CaMsg) {}
 
-fn handle_ca_proto_event_cancel(msg: &CaMsg) {}
+fn handle_ca_proto_event_add(_msg: CaMsg) {}
 
-fn handle_ca_proto_read(msg: &CaMsg) {}
+fn handle_ca_proto_event_cancel(_msg: CaMsg) {}
 
-fn handle_ca_proto_write(msg: &CaMsg) {}
+fn handle_ca_proto_read(_msg: CaMsg) {}
 
-fn handle_ca_proto_snapshot(msg: &CaMsg) {}
+fn handle_ca_proto_write(_msg: CaMsg) {}
 
-fn handle_ca_proto_build(msg: &CaMsg) {}
+fn handle_ca_proto_snapshot(_msg: CaMsg) {}
 
-fn handle_ca_proto_events_off(msg: &CaMsg) {}
+fn handle_ca_proto_build(_msg: CaMsg) {}
 
-fn handle_ca_proto_events_on(msg: &CaMsg) {}
+fn handle_ca_proto_events_off(_msg: CaMsg) {}
 
-fn handle_ca_proto_read_sync(msg: &CaMsg) {}
+fn handle_ca_proto_events_on(_msg: CaMsg) {}
 
-fn handle_ca_proto_error(msg: &CaMsg) {}
+fn handle_ca_proto_read_sync(_msg: CaMsg) {}
 
-fn handle_ca_proto_clear_channel(msg: &CaMsg) {}
+fn handle_ca_proto_error(_msg: CaMsg) {}
 
-fn handle_ca_proto_read_notify(msg: &CaMsg) {}
+fn handle_ca_proto_clear_channel(_msg: CaMsg) {}
 
-fn handle_ca_proto_read_build(msg: &CaMsg) {}
+fn handle_ca_proto_read_build(_msg: CaMsg) {}
 
-fn handle_ca_proto_write_notify(msg: &CaMsg) {}
+fn handle_ca_proto_write_notify(_msg: CaMsg) {}
 
-fn handle_ca_proto_client_name(msg: &CaMsg) {}
+fn handle_ca_proto_client_name(_msg: CaMsg) {}
 
-fn handle_ca_proto_host_name(msg: &CaMsg) {}
+fn handle_ca_proto_host_name(_msg: CaMsg) {}
 
-fn handle_ca_proto_signal(msg: &CaMsg) {}
+fn handle_ca_proto_signal(_msg: CaMsg) {}
 
-fn handle_ca_proto_create_ch_fail(msg: &CaMsg) {}
+fn handle_ca_proto_create_ch_fail(_msg: CaMsg) {}
 
-fn handle_ca_proto_server_disconn(msg: &CaMsg) {}
+fn handle_ca_proto_server_disconn(_msg: CaMsg) {}

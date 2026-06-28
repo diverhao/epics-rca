@@ -1,5 +1,6 @@
 use crate::ca::ca_cmd::CaCmd;
-use crate::channel::channel::ChannelState;
+use crate::channel::dbr::{ChannelSeverity, ChannelStatus, ChannelState, ChannelAccessRights};
+use crate::channel::dbr::{DbrType, DbrValue};
 use crate::context::context::get_context;
 use crate::udp::udp::UDP;
 use ::log::debug;
@@ -9,7 +10,6 @@ use std::net::IpAddr;
 use std::net::Ipv4Addr;
 use std::net::SocketAddr;
 use std::sync::{Arc, RwLock, RwLockReadGuard, RwLockWriteGuard};
-
 
 #[derive(Debug)]
 pub struct CaHeader {
@@ -25,7 +25,7 @@ impl fmt::Display for CaHeader {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         let [payload_size, data_type, data_count, param1, param2] = self.field_names();
 
-        writeln!(f, "Header:")?;
+        writeln!(f, "\nHeader:")?;
         writeln!(f, "  {:<14}: {}", "cmd", self.cmd)?;
         writeln!(f, "  {:<14}: {}", payload_size, self.payload_size)?;
         writeln!(f, "  {:<14}: {}", data_type, self.data_type)?;

@@ -87,7 +87,7 @@ impl Context {
         channels.create_channels(names)
     }
 
-    pub async fn start_search_ca(self: &Self) {
+    pub fn start_search_ca(self: &Self) {
         let channels = self.channels();
         channels.start_search_ca();
     }

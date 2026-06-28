@@ -1,6 +1,7 @@
 use crate::ca::ca_cmd::CaCmd;
 use crate::ca::header::CaHeader;
-use crate::channel::channel::ChannelState;
+use crate::channel::dbr::{ChannelSeverity, ChannelStatus, ChannelState, ChannelAccessRights};
+use crate::channel::dbr::{DbrType, DbrValue};
 use crate::context::context::get_context;
 use crate::udp::udp::UDP;
 use ::log::debug;
@@ -10,7 +11,6 @@ use std::net::IpAddr;
 use std::net::Ipv4Addr;
 use std::net::SocketAddr;
 use std::sync::{Arc, RwLock, RwLockReadGuard, RwLockWriteGuard};
-
 
 pub const MAX_UDP_SEND: usize = 1024;
 
@@ -68,7 +68,41 @@ pub struct CaMsg {
 
 impl std::fmt::Display for CaMsg {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "{}", self.header)
+        writeln!(f, "{}", self.header)?;
+
+        let payload_len = self.payload.len();
+        let show_len = payload_len.min(80);
+        writeln!(f, "Payload: {payload_len} bytes, showing {show_len}")?;
+
+        for (line, chunk) in self.payload[..show_len].chunks(16).enumerate() {
+            write!(f, "  {:04x}  ", line * 16)?;
+
+            for i in 0..16 {
+                if let Some(byte) = chunk.get(i) {
+                    write!(f, "{byte:02x} ")?;
+                } else {
+                    write!(f, "   ")?;
+                }
+
+                if i == 7 {
+                    write!(f, " ")?;
+                }
+            }
+
+            write!(f, " ")?;
+            for byte in chunk {
+                let byte = *byte;
+                let ch = if byte.is_ascii_graphic() || byte == b' ' {
+                    byte as char
+                } else {
+                    '.'
+                };
+                write!(f, "{ch}")?;
+            }
+            writeln!(f)?;
+        }
+
+        Ok(())
     }
 }
 
@@ -261,6 +295,30 @@ impl CaMsg {
                 })
             }
             None => Err("".to_string()),
+        }
+    }
+
+    pub fn build_read_notify(
+        dbr_type: DbrType,
+        data_count: u32,
+        sid: u32,
+        ioid: u32,
+        dest: &Vec<SocketAddr>,
+    ) -> CaMsg {
+        let dbr_type = dbr_type as u16;
+        let header = CaHeader {
+            cmd: CaCmd::CaProtoReadNotify,
+            payload_size: 0,
+            data_type: dbr_type,
+            data_count: data_count,
+            param1: sid,
+            param2: ioid,
+        };
+        CaMsg {
+            header: header,
+            payload: vec![],
+            src: None,
+            dest: dest.clone(),
         }
     }
 

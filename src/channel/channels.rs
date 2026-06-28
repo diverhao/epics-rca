@@ -1,9 +1,9 @@
-use log::{debug, warn};
-
 use crate::ca::message::{CaMsg, MAX_UDP_SEND};
-use crate::channel::channel::ChannelState;
+use crate::channel::dbr::{ChannelSeverity, ChannelStatus, ChannelState, ChannelAccessRights};
+use crate::channel::dbr::{DbrType, DbrValue};
 use crate::env::env::EnvType;
 use crate::{channel::channel::Channel, context::context::get_context};
+use log::{debug, warn};
 use std::char::MAX;
 use std::collections::HashMap;
 use std::fmt;
@@ -12,12 +12,15 @@ use std::sync::RwLock;
 use std::sync::RwLockReadGuard;
 use std::sync::RwLockWriteGuard;
 use std::sync::atomic::{AtomicU32, Ordering};
+use tokio::sync::oneshot::Sender;
 use tokio::time::{self, Duration};
 
 pub struct Channels {
     by_name: RwLock<HashMap<String, Arc<Channel>>>,
     by_cid: RwLock<HashMap<u32, Arc<Channel>>>,
     next_cid: AtomicU32,
+    next_ioid: AtomicU32, // read and write
+    ios: RwLock<HashMap<u32, (Sender<CaMsg>, u32)>>,
 }
 
 impl fmt::Display for Channels {
@@ -46,6 +49,8 @@ impl Channels {
             by_name: RwLock::new(HashMap::new()),
             by_cid: RwLock::new(HashMap::new()),
             next_cid: AtomicU32::new(1),
+            next_ioid: AtomicU32::new(0),
+            ios: RwLock::new(HashMap::new()),
         }
     }
 
@@ -169,6 +174,22 @@ impl Channels {
         self.by_cid.write().unwrap()
     }
 
+    fn ios(self: &Self) -> RwLockReadGuard<'_, HashMap<u32, (Sender<CaMsg>, u32)>> {
+        self.ios.read().unwrap()
+    }
+
+    fn ios_mut(self: &Self) -> RwLockWriteGuard<'_, HashMap<u32, (Sender<CaMsg>, u32)>> {
+        self.ios.write().unwrap()
+    }
+
+    pub fn add_io(self: &Self, ioid: u32, tx: Sender<CaMsg>, cid: u32) {
+        self.ios_mut().insert(ioid, (tx, cid));
+    }
+
+    pub fn remove_io(self: &Self, ioid: u32) -> Option<(Sender<CaMsg>, u32)> {
+        self.ios_mut().remove(&ioid)
+    }
+
     pub fn channel_by_cid(self: &Self, cid: u32) -> Option<Arc<Channel>> {
         let by_cid = self.by_cid();
         by_cid.get(&cid).cloned()
@@ -181,6 +202,11 @@ impl Channels {
 
     pub fn next_cid(self: &Self) -> u32 {
         let id = self.next_cid.fetch_add(1, Ordering::Relaxed);
+        id
+    }
+
+    pub fn next_ioid(self: &Self) -> u32 {
+        let id = self.next_ioid.fetch_add(1, Ordering::Relaxed);
         id
     }
 }

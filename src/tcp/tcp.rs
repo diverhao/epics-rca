@@ -23,7 +23,6 @@ pub struct TCP {
 }
 
 impl TCP {
-
     pub async fn new(addr: SocketAddr) -> Result<Self, String> {
         let ip = addr.ip();
         let port = addr.port();
@@ -70,9 +69,7 @@ impl TCP {
                         buf.extend_from_slice(&buf_pending[..size]);
                         let msgs = CaMsg::from_buf(&mut buf, Some(self.addr().clone()), vec![]);
                         let src = *self.addr();
-                        // tokio::spawn(async move {
-                        handle_tcp_msgs(&src, &msgs).await;
-                        // });
+                        handle_tcp_msgs(&src, msgs).await;
                     }
                     Err(err) => {
                         error!("{err}");
