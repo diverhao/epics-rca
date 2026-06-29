@@ -2,7 +2,7 @@ use crate::ca::ca_cmd::CaCmd;
 use crate::ca::header::CaHeader;
 use crate::ca::message::{CA_MINOR_VERSION, CaMsg, SearchReplyFlag};
 use crate::channel;
-use crate::channel::monitor::{ChannelMonitor, ChannelMonitorState};
+use crate::channel::monitor::{Monitor, MonitorState};
 use crate::channel::dbr::{ChannelAccessRights, ChannelSeverity, ChannelState, ChannelStatus};
 use crate::channel::dbr::{DbrType, DbrValue};
 use crate::context::context::get_context;
@@ -205,7 +205,7 @@ fn handle_ca_proto_event_add(msg: CaMsg) {
         None => return,
     };
 
-    if channel.monitor_state() == ChannelMonitorState::NotRunning {
+    if channel.monitor_state() == MonitorState::NotRunning {
         // must be Starting or Running
         debug!("Monitor has been stopped");
         return;
@@ -215,7 +215,7 @@ fn handle_ca_proto_event_add(msg: CaMsg) {
     channel.update_from_payload_buf(msg.payload(), num_elem, dbr_type);
 
     // update the monitor state
-    channel.set_monitor_state(ChannelMonitorState::Running);
+    channel.set_monitor_state(MonitorState::Running);
     channel.set_monitor_data_count(data_count);
     channel.set_monitor_data_type(dbr_type);
 

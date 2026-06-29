@@ -1,5 +1,5 @@
-use crate::channel::meta::ChannelMeta;
-use crate::channel::monitor::{ChannelMonitor, ChannelMonitorState, MonitorCallback};
+use crate::channel::meta::Meta;
+use crate::channel::monitor::{Monitor, MonitorCallback, MonitorState};
 use crate::context::context::get_context;
 use core::num;
 use std::net::SocketAddr;
@@ -8,7 +8,6 @@ use std::sync::{
     atomic::{AtomicU32, Ordering},
 };
 use tokio::sync::Notify;
-
 use crate::ca::message::CaMsg;
 use crate::channel::dbr::{ChannelAccessRights, ChannelSeverity, ChannelState, ChannelStatus};
 use crate::channel::dbr::{DbrType, DbrValue};
@@ -18,40 +17,12 @@ pub struct Channel {
     name: String,
     cid: u32,       // client ID
     sid: AtomicU32, // server ID, assigned after channel created on server
-    meta: RwLock<ChannelMeta>,
+    meta: Arc<Meta>,
     value: RwLock<Option<DbrValue>>,
     search_counter: AtomicU32,
     addr: RwLock<Option<SocketAddr>>,
     state_change_notifier: Notify,
-    monitor: Arc<ChannelMonitor>,
-}
-
-impl std::fmt::Display for Channel {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        let meta = self.meta();
-
-        f.debug_struct("Channel")
-            .field("name", &self.name)
-            .field("cid", &self.cid)
-            .field("state", &meta.state)
-            .field("access_right", &meta.access_right)
-            .field("status", &meta.status)
-            .field("severity", &meta.severity)
-            .field("seconds_since_epoch", &meta.seconds_since_epoch)
-            .field("nano_seconds", &meta.nano_seconds)
-            .field("units", &meta.units)
-            .field("precision", &meta.precision)
-            .field("padding", &meta.padding)
-            .field("number_of_string_used", &meta.number_of_string_used)
-            .field("strings", &meta.strings)
-            .field("upper_display_limit", &meta.upper_display_limit)
-            .field("lower_display_limit", &meta.lower_display_limit)
-            .field("upper_alarm_limit", &meta.upper_alarm_limit)
-            .field("lower_alarm_limit", &meta.lower_alarm_limit)
-            .field("upper_warning_limit", &meta.upper_warning_limit)
-            .field("lower_warning_limit", &meta.lower_warning_limit)
-            .finish()
-    }
+    monitor: Arc<Monitor>,
 }
 
 impl Channel {
@@ -61,32 +32,32 @@ impl Channel {
             cid: cid,
             sid: AtomicU32::new(0),
             search_counter: AtomicU32::new(1),
-            meta: RwLock::new(ChannelMeta {
-                state: ChannelState::NeverConnected,
-                access_right: ChannelAccessRights::None,
-                status: ChannelStatus::NoAlarm,
-                severity: ChannelSeverity::NoAlarm,
-                dbr_type_native: DbrType::Double,
-                data_count_native: 0,
-                seconds_since_epoch: 0,
-                nano_seconds: 0,
-                units: String::new(),
-                precision: 0,
-                padding: 0,
-                number_of_string_used: 0,
-                strings: std::array::from_fn(|_| String::new()),
-                upper_display_limit: 0,
-                lower_display_limit: 0,
-                upper_alarm_limit: 0,
-                lower_alarm_limit: 0,
-                upper_warning_limit: 0,
-                lower_warning_limit: 0,
+            meta: Arc::new(Meta {
+                state: RwLock::new(ChannelState::NeverConnected),
+                access_right: RwLock::new(ChannelAccessRights::None),
+                status: RwLock::new(ChannelStatus::NoAlarm),
+                severity: RwLock::new(ChannelSeverity::NoAlarm),
+                dbr_type_native: RwLock::new(DbrType::Double),
+                data_count_native: RwLock::new(0),
+                seconds_since_epoch: RwLock::new(0),
+                nano_seconds: RwLock::new(0),
+                units: RwLock::new(String::new()),
+                precision: RwLock::new(0),
+                padding: RwLock::new(0),
+                number_of_string_used: RwLock::new(0),
+                strings: RwLock::new(std::array::from_fn(|_| String::new())),
+                upper_display_limit: RwLock::new(0),
+                lower_display_limit: RwLock::new(0),
+                upper_alarm_limit: RwLock::new(0),
+                lower_alarm_limit: RwLock::new(0),
+                upper_warning_limit: RwLock::new(0),
+                lower_warning_limit: RwLock::new(0),
             }),
             value: RwLock::new(None),
             addr: RwLock::new(None),
             state_change_notifier: Notify::new(),
-            monitor: Arc::new(ChannelMonitor {
-                state: RwLock::new(ChannelMonitorState::NotRunning),
+            monitor: Arc::new(Monitor {
+                state: RwLock::new(MonitorState::NotRunning),
                 dbr_type: RwLock::new(DbrType::Double),
                 data_count: AtomicU32::new(0),
                 callback: RwLock::new(None),
@@ -286,7 +257,7 @@ impl Channel {
                     Some(tcp) => {
                         // set monitor's callback
                         self.set_monitor_callback(callback);
-                        self.set_monitor_state(ChannelMonitorState::Starting);
+                        self.set_monitor_state(MonitorState::Starting);
                         // send out CA_PROTO_EVENT_ADD
                         tcp.send_msgs(vec![msg]).await;
                     }
@@ -298,13 +269,13 @@ impl Channel {
     }
 
     pub async fn cancel_monitor(self: &Self) {
-        if self.monitor_state() == ChannelMonitorState::NotRunning {
+        if self.monitor_state() == MonitorState::NotRunning {
             // already stopped
             return;
         }
         // clear the monitor related stuff
         self.set_monitor_callback(None);
-        self.set_monitor_state(ChannelMonitorState::NotRunning);
+        self.set_monitor_state(MonitorState::NotRunning);
 
         // send CA_PROTO_EVENT_CANCEL
         let dbr_type = self.monitor_data_type();
@@ -332,7 +303,6 @@ impl Channel {
         }
     }
 
-
     // ------------- data setter ----------------
 
     pub fn set_sid(&self, new_sid: u32) {
@@ -347,7 +317,6 @@ impl Channel {
         *self.value.write().unwrap() = new_value;
     }
 
-
     pub fn increment_search_counter(&self) -> u32 {
         self.search_counter.fetch_add(1, Ordering::Relaxed) + 1
     }
@@ -356,19 +325,18 @@ impl Channel {
         self.search_counter.swap(0, Ordering::Relaxed)
     }
 
-
     // --------------- data getter ---------------------
-    
+
     pub fn name(&self) -> &str {
         &self.name
     }
 
-    pub fn meta(&self) -> RwLockReadGuard<'_, ChannelMeta> {
-        self.meta.read().unwrap()
+    pub fn meta(&self) -> Arc<Meta> {
+        self.meta.clone()
     }
 
-    fn meta_mut(&self) -> RwLockWriteGuard<'_, ChannelMeta> {
-        self.meta.write().unwrap()
+    pub fn monitor(self: &Self) -> Arc<Monitor> {
+        self.monitor.clone()
     }
 
     pub fn value(&self) -> RwLockReadGuard<'_, Option<DbrValue>> {
@@ -395,207 +363,8 @@ impl Channel {
         &self.state_change_notifier
     }
 
-    // -------------------- meta -------------------
-
-    // getters
-
-    pub fn state(&self) -> ChannelState {
-        self.meta().state
-    }
-
-    pub fn status(&self) -> ChannelStatus {
-        self.meta().status
-    }
-
-    pub fn severity(&self) -> ChannelSeverity {
-        self.meta().severity
-    }
-
-    pub fn dbr_type_native(self: &Self) -> DbrType {
-        self.meta().dbr_type_native
-    }
-
-    pub fn seconds_since_epoch(&self) -> i32 {
-        self.meta().seconds_since_epoch
-    }
-
-    pub fn data_count_native(&self) -> u32 {
-        self.meta().data_count_native
-    }
-
-    pub fn nano_seconds(&self) -> u32 {
-        self.meta().nano_seconds
-    }
-
-    pub fn units(&self) -> String {
-        self.meta().units.clone()
-    }
-
-    pub fn precision(&self) -> i16 {
-        self.meta().precision
-    }
-
-    pub fn padding(&self) -> i16 {
-        self.meta().padding
-    }
-
-    pub fn number_of_string_used(&self) -> i16 {
-        self.meta().number_of_string_used
-    }
-
-    pub fn strings(&self) -> [String; 16] {
-        self.meta().strings.clone()
-    }
-
-    pub fn upper_display_limit(&self) -> i16 {
-        self.meta().upper_display_limit
-    }
-
-    pub fn lower_display_limit(&self) -> i16 {
-        self.meta().lower_display_limit
-    }
-
-    pub fn upper_alarm_limit(&self) -> i16 {
-        self.meta().upper_alarm_limit
-    }
-
-    pub fn lower_alarm_limit(&self) -> i16 {
-        self.meta().lower_alarm_limit
-    }
-
-    pub fn upper_warning_limit(&self) -> i16 {
-        self.meta().upper_warning_limit
-    }
-
-    pub fn lower_warning_limit(&self) -> i16 {
-        self.meta().lower_warning_limit
-    }
-
-    // setters
-
-    pub fn set_state(&self, new_state: ChannelState) {
-        self.meta_mut().state = new_state;
-        self.state_change_notifier().notify_waiters();
-    }
-
-    pub fn set_status(&self, new_status: ChannelStatus) {
-        self.meta_mut().status = new_status;
-    }
-
-    pub fn set_severity(&self, new_severity: ChannelSeverity) {
-        self.meta_mut().severity = new_severity;
-    }
-
-    pub fn set_dbr_type_native(&self, new_dbr_type_native: DbrType) {
-        self.meta_mut().dbr_type_native = new_dbr_type_native;
-    }
-
-    pub fn set_seconds_since_epoch(&self, new_seconds_since_epoch: i32) {
-        self.meta_mut().seconds_since_epoch = new_seconds_since_epoch;
-    }
-
-    pub fn set_nano_seconds(&self, new_nano_seconds: u32) {
-        self.meta_mut().nano_seconds = new_nano_seconds;
-    }
-
-    pub fn set_data_count_native(&self, data_count: u32) {
-        self.meta_mut().data_count_native = data_count;
-    }
-
-    pub fn set_units(&self, new_units: String) {
-        self.meta_mut().units = new_units;
-    }
-
-    pub fn set_precision(&self, new_precision: i16) {
-        self.meta_mut().precision = new_precision;
-    }
-
-    pub fn set_padding(&self, new_padding: i16) {
-        self.meta_mut().padding = new_padding;
-    }
-
-    pub fn set_number_of_string_used(&self, new_number_of_string_used: i16) {
-        self.meta_mut().number_of_string_used = new_number_of_string_used;
-    }
-
-    pub fn set_strings(&self, new_strings: [String; 16]) {
-        self.meta_mut().strings = new_strings;
-    }
-
-    pub fn set_upper_display_limit(&self, new_upper_display_limit: i16) {
-        self.meta_mut().upper_display_limit = new_upper_display_limit;
-    }
-
-    pub fn set_lower_display_limit(&self, new_lower_display_limit: i16) {
-        self.meta_mut().lower_display_limit = new_lower_display_limit;
-    }
-
-    pub fn set_upper_alarm_limit(&self, new_upper_alarm_limit: i16) {
-        self.meta_mut().upper_alarm_limit = new_upper_alarm_limit;
-    }
-
-    pub fn set_lower_alarm_limit(&self, new_lower_alarm_limit: i16) {
-        self.meta_mut().lower_alarm_limit = new_lower_alarm_limit;
-    }
-
-    pub fn set_upper_warning_limit(&self, new_upper_warning_limit: i16) {
-        self.meta_mut().upper_warning_limit = new_upper_warning_limit;
-    }
-
-    pub fn set_lower_warning_limit(&self, new_lower_warning_limit: i16) {
-        self.meta_mut().lower_warning_limit = new_lower_warning_limit;
-    }
-
-    pub fn set_access_right(self: &Self, access_right: ChannelAccessRights) {
-        self.meta_mut().access_right = access_right;
-    }
-
-    // --------- monitor -------------
-
-    // getters 
-
-    pub fn monitor(self: &Self) -> Arc<ChannelMonitor> {
-        self.monitor.clone()
-    }
-
-    pub fn monitor_callback(self: &Self) -> Option<MonitorCallback> {
-        let monitor = self.monitor();
-        monitor.callback.read().unwrap().clone()
-    }
-
-    pub fn monitor_data_count(self: &Self) -> u32 {
-        self.monitor().data_count.load(Ordering::Relaxed)
-    }
-
-    pub fn monitor_data_type(self: &Self) -> DbrType {
-        self.monitor().dbr_type.read().unwrap().clone()
-    }
-
-    pub fn monitor_state(self: &Self) -> ChannelMonitorState {
-        self.monitor().state.read().unwrap().clone()
-    }
-
-    // setters
-
-
-    pub fn set_monitor_callback(self: &Self, callback: Option<MonitorCallback>) {
-        *self.monitor().callback.write().unwrap() = callback;
-    }
-
-    pub fn set_monitor_data_count(self: &Self, count: u32) {
-        self.monitor().data_count.store(count, Ordering::Relaxed);
-    }
-
-    pub fn set_monitor_data_type(self: &Self, data_type: DbrType) {
-        *self.monitor().dbr_type.write().unwrap() = data_type;
-    }
-
-    pub fn set_monitor_state(self: &Self, state: ChannelMonitorState) {
-        *self.monitor().state.write().unwrap() = state;
-    }
-
     // ------------- event ----------------
-    
+
     async fn wait_state_change(self: &Self, state: ChannelState) {
         loop {
             let notified = self.state_change_notifier().notified();
@@ -615,5 +384,34 @@ impl Channel {
         } else {
             // no callback
         }
+    }
+}
+
+
+impl std::fmt::Display for Channel {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let meta = self.meta();
+
+        f.debug_struct("Channel")
+            .field("name", &self.name)
+            .field("cid", &self.cid)
+            .field("state", &meta.state)
+            .field("access_right", &meta.access_right)
+            .field("status", &meta.status)
+            .field("severity", &meta.severity)
+            .field("seconds_since_epoch", &meta.seconds_since_epoch)
+            .field("nano_seconds", &meta.nano_seconds)
+            .field("units", &meta.units)
+            .field("precision", &meta.precision)
+            .field("padding", &meta.padding)
+            .field("number_of_string_used", &meta.number_of_string_used)
+            .field("strings", &meta.strings)
+            .field("upper_display_limit", &meta.upper_display_limit)
+            .field("lower_display_limit", &meta.lower_display_limit)
+            .field("upper_alarm_limit", &meta.upper_alarm_limit)
+            .field("lower_alarm_limit", &meta.lower_alarm_limit)
+            .field("upper_warning_limit", &meta.upper_warning_limit)
+            .field("lower_warning_limit", &meta.lower_warning_limit)
+            .finish()
     }
 }

@@ -39,7 +39,7 @@ async fn main() {
     let data = Arc::new(RwLock::new(0.0));
     let data_for_callback = Arc::clone(&data);
 
-    let channel = context.create_channel("val1");
+    let channel = context.create_channel("val2002");
     // channel.get(channel::dbr::DbrType::StsDouble, 1).await;
     channel.get(None, None).await;
 
