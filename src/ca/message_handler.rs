@@ -176,7 +176,7 @@ fn handle_ca_proto_read_notify(msg: CaMsg) {
     // tell the get() to proceed
     let ioid = msg.header().param2;
     let sid = msg.header().param1;
-    match get_context().channels().remove_io(ioid) {
+    match get_context().channels().remove_io_by_ioid(ioid) {
         Some((tx, cid)) => {
             let channel = get_context().channels().channel_by_cid(cid);
             match channel {
@@ -227,6 +227,11 @@ fn handle_ca_proto_event_cancel(msg: CaMsg) {
     // do nothing
 }
 
+fn handle_ca_proto_clear_channel(_msg: CaMsg) {
+    // do nothing
+}
+
+
 fn handle_ca_proto_not_found(_msg: CaMsg) {}
 
 fn handle_ca_proto_echo(_msg: CaMsg) {}
@@ -253,7 +258,6 @@ fn handle_ca_proto_read_sync(_msg: CaMsg) {}
 
 fn handle_ca_proto_error(_msg: CaMsg) {}
 
-fn handle_ca_proto_clear_channel(_msg: CaMsg) {}
 
 fn handle_ca_proto_read_build(_msg: CaMsg) {}
 

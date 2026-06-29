@@ -1,4 +1,5 @@
 use crate::ca::message::{CaMsg, MAX_UDP_SEND};
+use crate::channel;
 use crate::channel::dbr::{ChannelAccessRights, ChannelSeverity, ChannelState, ChannelStatus};
 use crate::channel::dbr::{DbrType, DbrValue};
 use crate::env::env::EnvType;
@@ -20,27 +21,7 @@ pub struct Channels {
     by_cid: RwLock<HashMap<u32, Arc<Channel>>>,
     next_cid: AtomicU32,
     next_ioid: AtomicU32, // read and write
-    ios: RwLock<HashMap<u32, (Sender<CaMsg>, u32)>>,
-}
-
-impl fmt::Display for Channels {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        writeln!(f, "|name|cid|state|status|severity|time|")?;
-        for channel in self.by_cid().values() {
-            writeln!(
-                f,
-                "|{}|{}|{:?}|{:?}|{:?}|{}.{:09}|",
-                channel.name(),
-                channel.cid(),
-                channel.state(),
-                channel.status(),
-                channel.severity(),
-                channel.seconds_since_epoch(),
-                channel.nano_seconds()
-            )?;
-        }
-        Ok(())
-    }
+    ios: RwLock<HashMap<u32, (Sender<CaMsg>, u32)>>, // HashMap<ioid, (Sender<msg>, cid)>
 }
 
 impl Channels {
@@ -76,8 +57,28 @@ impl Channels {
         }
     }
 
-    // remove channel
-    pub fn remove_channel(self: &Self, name: &str) {}
+    pub async fn destroy_channel_by_cid(self: &Self, cid: u32) {
+        let channel = self.channel_by_cid(cid);
+        match channel {
+            Some(channel) => {channel.destroy().await}
+            None => {}
+        }
+    }
+
+    pub async fn destroy_channel_by_name(self: &Self, name: String) {
+        let channel = self.channel_by_name(&name);
+        match channel {
+            Some(channel) => {channel.destroy().await}
+            None => {}
+        }
+    }
+
+    pub async fn destroy_channels(self: &Self) {
+        let channels: Vec<Arc<Channel>> = self.by_cid().values().cloned().collect();
+        for channel in channels {
+            channel.destroy().await;
+        }
+    }
 
     // --------------- network -----------------
 
@@ -186,8 +187,20 @@ impl Channels {
         self.ios_mut().insert(ioid, (tx, cid));
     }
 
-    pub fn remove_io(self: &Self, ioid: u32) -> Option<(Sender<CaMsg>, u32)> {
+    pub fn remove_io_by_ioid(self: &Self, ioid: u32) -> Option<(Sender<CaMsg>, u32)> {
         self.ios_mut().remove(&ioid)
+    }
+
+    pub fn remove_io_by_cid(self: &Self, cid: u32) {
+        self.ios_mut().retain(|_, (_, io_cid)| *io_cid != cid);
+    }
+
+    pub fn remove_by_cid_channel(self: &Self, cid: u32) {
+        self.by_cid_mut().remove(&cid);
+    }
+
+    pub fn remove_by_name_channel(self: &Self, name: String) {
+        self.by_name_mut().remove(&name);
     }
 
     pub fn channel_by_cid(self: &Self, cid: u32) -> Option<Arc<Channel>> {
@@ -208,5 +221,33 @@ impl Channels {
     pub fn next_ioid(self: &Self) -> u32 {
         let id = self.next_ioid.fetch_add(1, Ordering::Relaxed);
         id
+    }
+}
+
+impl fmt::Display for Channels {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let mut ios: Vec<(u32, u32)> = self
+            .ios()
+            .iter()
+            .map(|(ioid, (_, cid))| (*ioid, *cid))
+            .collect();
+        ios.sort_by_key(|(ioid, _)| *ioid);
+
+        let mut channels: Vec<Arc<Channel>> = self.by_cid().values().cloned().collect();
+        channels.sort_by_key(|channel| channel.cid());
+
+        writeln!(f, "Channels {{")?;
+        writeln!(f, "    ios:")?;
+        writeln!(f, "        |ioid|cid|")?;
+        for (ioid, cid) in ios {
+            writeln!(f, "        |{}|{}|", ioid, cid)?;
+        }
+
+        writeln!(f, "    channels:")?;
+        for channel in channels {
+            let channel_text = channel.to_string().replace('\n', "\n        ");
+            writeln!(f, "        {}", channel_text.trim_start())?;
+        }
+        write!(f, "}}")
     }
 }

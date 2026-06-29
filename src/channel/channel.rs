@@ -158,6 +158,46 @@ impl Channel {
         }
     }
 
+    pub async fn destroy(self: &Self) {
+        let context = get_context();
+        let channels = context.channels();
+
+        // Mark state as Destroyed and notify waiters.
+        self.set_state(ChannelState::Destroyed);
+        self.state_change_notifier().notify_waiters();
+
+        // Cancel monitor
+        self.cancel_monitor().await;
+
+        // Remove pending ios entries for this cid.
+        get_context().channels().remove_io_by_cid(self.cid());
+
+        let addr = self.addr();
+        match addr {
+            Some(addr) => {
+                let tcp = get_context().tcps().tcp(&addr);
+                match tcp {
+                    Some(tcp) => {
+                        // Send CA_PROTO_CLEAR_CHANNEL if sid != 0.
+                        let msg = CaMsg::build_clear_channel(self.sid(), self.cid(), &vec![addr]);
+                        tcp.send_msgs(vec![msg]).await;
+                        // Remove cid from the associated TCP.
+                        tcp.remove_cid(self.cid());
+                    }
+                    None => {}
+                }
+            }
+            None => {}
+        }
+
+        // Clear addr.
+        self.set_addr(None);
+
+        // Remove from Channels.by_name and Channels.by_cid.
+        channels.remove_by_cid_channel(self.cid());
+        channels.remove_by_name_channel(self.name().to_string());
+    }
+
     // ------------------ get/put/monitor --------------
 
     pub async fn get(self: &Self, dbr_type: Option<DbrType>, data_count: Option<u32>) {
@@ -356,7 +396,7 @@ impl Channel {
     }
 
     pub fn addr(self: &Self) -> Option<SocketAddr> {
-        *self.addr.read().unwrap()
+        self.addr.read().unwrap().clone()
     }
 
     pub fn state_change_notifier(self: &Self) -> &Notify {

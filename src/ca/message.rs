@@ -371,6 +371,24 @@ impl CaMsg {
         }
     }
 
+    pub fn build_clear_channel(sid: u32, cid: u32, dest: &Vec<SocketAddr>) -> CaMsg {
+        let header = CaHeader {
+            cmd: CaCmd::CaProtoClearChannel,
+            payload_size: 0,
+            data_type: 0,
+            data_count: 0,
+            param1: sid,
+            param2: cid,
+        };
+        CaMsg {
+            header: header,
+            payload: vec![],
+            src: None,
+            dest: dest.clone(),
+        }
+
+    }
+
     // -------------- getters --------------------
     pub fn header(self: &Self) -> &CaHeader {
         &self.header

@@ -40,11 +40,18 @@ async fn main() {
     let data_for_callback = Arc::clone(&data);
 
     let channel = context.create_channel("val2002");
+    println!("{}", context.channels());
+
     // channel.get(channel::dbr::DbrType::StsDouble, 1).await;
     channel.get(None, None).await;
 
     let callback = move |channel: &Channel| {
-        debug!("{} has a new value: {:?}, {}", channel.name(), channel.value(), channel.meta());
+        debug!(
+            "{} has a new value: {:?}, {}",
+            channel.name(),
+            channel.value(),
+            channel.meta()
+        );
         let value = match channel.value().clone().unwrap() {
             DbrValue::Double(value) => Some(value),
             _ => None,
@@ -56,13 +63,23 @@ async fn main() {
     };
 
     channel
-        .start_to_monitor(Some(channel.dbr_type_native_to_gr()), None, Some(Arc::new(callback)))
+        .start_to_monitor(
+            Some(channel.dbr_type_native_to_gr()),
+            None,
+            Some(Arc::new(callback)),
+        )
         .await;
     sleep(Duration::from_secs(5)).await;
-    channel.cancel_monitor().await;
+    // channel.cancel_monitor().await;
+    channel.destroy().await;
 
-
-    debug!("-----------> {:?}, {}, {}, {}", channel.value(), data.read().unwrap(), channel.monitor(), channel);
+    debug!(
+        "-----------> {:?}, {}, {}, {}",
+        channel.value(),
+        data.read().unwrap(),
+        channel.monitor(),
+        channel
+    );
     // context.create_channel("val2afadsfsa");
     println!("{}", context.channels());
     tokio::signal::ctrl_c()
