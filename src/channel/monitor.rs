@@ -31,7 +31,7 @@ pub struct Monitor {
 }
 
 impl Monitor {
-    
+
     // ---------------- getters -------------------
 
     pub fn state(self: &Self) -> MonitorState {
@@ -80,7 +80,7 @@ impl std::fmt::Display for Monitor {
             "None"
         };
 
-        writeln!(f, "Channel Monitor {{")?;
+        writeln!(f, "Monitor {{")?;
         writeln!(f, "    state: {:?},", state)?;
         writeln!(f, "    dbr_type: {:?},", dbr_type)?;
         writeln!(f, "    data_count: {},", data_count)?;

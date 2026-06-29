@@ -201,7 +201,7 @@ impl Meta {
 
 impl std::fmt::Display for Meta {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        writeln!(f, "ChannelMeta {{")?;
+        writeln!(f, "Meta {{")?;
         writeln!(f, "    state: {:?},", self.state())?;
         writeln!(f, "    access_right: {:?},", self.access_right())?;
         writeln!(f, "    status: {:?},", self.status())?;

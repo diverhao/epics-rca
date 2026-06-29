@@ -62,7 +62,7 @@ async fn main() {
     channel.cancel_monitor().await;
 
 
-    debug!("-----------> {:?}, {}, {}", channel.value(), data.read().unwrap(), channel.monitor());
+    debug!("-----------> {:?}, {}, {}, {}", channel.value(), data.read().unwrap(), channel.monitor(), channel);
     // context.create_channel("val2afadsfsa");
     println!("{}", context.channels());
     tokio::signal::ctrl_c()

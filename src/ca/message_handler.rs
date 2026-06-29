@@ -1,4 +1,4 @@
-use crate::ca::ca_cmd::CaCmd;
+use crate::ca::cmd::CaCmd;
 use crate::ca::header::CaHeader;
 use crate::ca::message::{CA_MINOR_VERSION, CaMsg, SearchReplyFlag};
 use crate::channel;

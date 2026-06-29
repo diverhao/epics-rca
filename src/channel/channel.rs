@@ -1,17 +1,17 @@
+use crate::ca::message::CaMsg;
+use crate::channel::dbr::{ChannelAccessRights, ChannelSeverity, ChannelState, ChannelStatus};
+use crate::channel::dbr::{DbrType, DbrValue};
 use crate::channel::meta::Meta;
 use crate::channel::monitor::{Monitor, MonitorCallback, MonitorState};
 use crate::context::context::get_context;
 use core::num;
+use log::{debug, error, warn};
 use std::net::SocketAddr;
 use std::sync::{
     Arc, RwLock, RwLockReadGuard, RwLockWriteGuard,
     atomic::{AtomicU32, Ordering},
 };
 use tokio::sync::Notify;
-use crate::ca::message::CaMsg;
-use crate::channel::dbr::{ChannelAccessRights, ChannelSeverity, ChannelState, ChannelStatus};
-use crate::channel::dbr::{DbrType, DbrValue};
-use log::{debug, error, warn};
 
 pub struct Channel {
     name: String,
@@ -386,32 +386,20 @@ impl Channel {
         }
     }
 }
-
-
 impl std::fmt::Display for Channel {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        let meta = self.meta();
+        let meta = self.meta.as_ref().to_string().replace('\n', "\n    ");
+        let monitor = self.monitor.as_ref().to_string().replace('\n', "\n    ");
 
-        f.debug_struct("Channel")
-            .field("name", &self.name)
-            .field("cid", &self.cid)
-            .field("state", &meta.state)
-            .field("access_right", &meta.access_right)
-            .field("status", &meta.status)
-            .field("severity", &meta.severity)
-            .field("seconds_since_epoch", &meta.seconds_since_epoch)
-            .field("nano_seconds", &meta.nano_seconds)
-            .field("units", &meta.units)
-            .field("precision", &meta.precision)
-            .field("padding", &meta.padding)
-            .field("number_of_string_used", &meta.number_of_string_used)
-            .field("strings", &meta.strings)
-            .field("upper_display_limit", &meta.upper_display_limit)
-            .field("lower_display_limit", &meta.lower_display_limit)
-            .field("upper_alarm_limit", &meta.upper_alarm_limit)
-            .field("lower_alarm_limit", &meta.lower_alarm_limit)
-            .field("upper_warning_limit", &meta.upper_warning_limit)
-            .field("lower_warning_limit", &meta.lower_warning_limit)
-            .finish()
+        writeln!(f, "\nChannel {{")?;
+        writeln!(f, "    name: {:?},", self.name)?;
+        writeln!(f, "    cid: {},", self.cid)?;
+        writeln!(f, "    sid: {},", self.sid())?;
+        writeln!(f, "    meta: {},", meta)?;
+        writeln!(f, "    value: {:?},", self.value.read().unwrap().as_ref())?;
+        writeln!(f, "    search_counter: {},", self.search_counter())?;
+        writeln!(f, "    addr: {:?},", self.addr())?;
+        writeln!(f, "    monitor: {}", monitor)?;
+        write!(f, "}}")
     }
 }
