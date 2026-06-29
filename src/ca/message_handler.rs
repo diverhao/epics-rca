@@ -2,6 +2,7 @@ use crate::ca::ca_cmd::CaCmd;
 use crate::ca::header::CaHeader;
 use crate::ca::message::{CA_MINOR_VERSION, CaMsg, SearchReplyFlag};
 use crate::channel;
+use crate::channel::monitor::{ChannelMonitor, ChannelMonitorState};
 use crate::channel::dbr::{ChannelAccessRights, ChannelSeverity, ChannelState, ChannelStatus};
 use crate::channel::dbr::{DbrType, DbrValue};
 use crate::context::context::get_context;
@@ -191,7 +192,8 @@ fn handle_ca_proto_read_notify(msg: CaMsg) {
 
 fn handle_ca_proto_event_add(msg: CaMsg) {
     // actually cid
-    let subid = msg.header().param2;
+    let subid: u32 = msg.header().param2;
+    let data_count = msg.header().data_count;
     let num_elem = msg.header().data_count;
     let dbr_type_num = msg.header().data_type;
     let dbr_type = match DbrType::from_u16(dbr_type_num) {
@@ -202,10 +204,27 @@ fn handle_ca_proto_event_add(msg: CaMsg) {
         Some(channel) => channel,
         None => return,
     };
+
+    if channel.monitor_state() == ChannelMonitorState::NotRunning {
+        // must be Starting or Running
+        debug!("Monitor has been stopped");
+        return;
+    }
+
     // update value and meta first
     channel.update_from_payload_buf(msg.payload(), num_elem, dbr_type);
-    // call callback later
+
+    // update the monitor state
+    channel.set_monitor_state(ChannelMonitorState::Running);
+    channel.set_monitor_data_count(data_count);
+    channel.set_monitor_data_type(dbr_type);
+
+    // call callback, it is already set
     channel.call_monitor_callback();
+}
+
+fn handle_ca_proto_event_cancel(msg: CaMsg) {
+    // do nothing
 }
 
 fn handle_ca_proto_not_found(_msg: CaMsg) {}
@@ -217,8 +236,6 @@ fn handle_ca_proto_rsrv_is_up(_msg: CaMsg) {}
 fn handle_ca_repeater_confirm(_msg: CaMsg) {}
 
 fn handle_ca_repeater_register(_msg: CaMsg) {}
-
-fn handle_ca_proto_event_cancel(_msg: CaMsg) {}
 
 fn handle_ca_proto_read(_msg: CaMsg) {}
 

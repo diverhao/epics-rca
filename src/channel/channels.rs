@@ -1,5 +1,5 @@
 use crate::ca::message::{CaMsg, MAX_UDP_SEND};
-use crate::channel::dbr::{ChannelSeverity, ChannelStatus, ChannelState, ChannelAccessRights};
+use crate::channel::dbr::{ChannelAccessRights, ChannelSeverity, ChannelState, ChannelStatus};
 use crate::channel::dbr::{DbrType, DbrValue};
 use crate::env::env::EnvType;
 use crate::{channel::channel::Channel, context::context::get_context};

@@ -1,5 +1,5 @@
 use crate::ca::ca_cmd::CaCmd;
-use crate::channel::dbr::{ChannelSeverity, ChannelStatus, ChannelState, ChannelAccessRights};
+use crate::channel::dbr::{ChannelAccessRights, ChannelSeverity, ChannelState, ChannelStatus};
 use crate::channel::dbr::{DbrType, DbrValue};
 use crate::context::context::get_context;
 use crate::udp::udp::UDP;

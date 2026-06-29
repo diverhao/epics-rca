@@ -1,6 +1,6 @@
 use crate::ca::ca_cmd::CaCmd;
 use crate::ca::header::CaHeader;
-use crate::channel::dbr::{ChannelSeverity, ChannelStatus, ChannelState, ChannelAccessRights};
+use crate::channel::dbr::{ChannelAccessRights, ChannelSeverity, ChannelState, ChannelStatus};
 use crate::channel::dbr::{DbrType, DbrValue};
 use crate::context::context::get_context;
 use crate::udp::udp::UDP;
@@ -347,7 +347,29 @@ impl CaMsg {
         }
     }
 
-
+    pub fn build_event_cancel(
+        dbr_type: DbrType,
+        data_count: u32,
+        sid: u32,
+        subid: u32,
+        dest: &Vec<SocketAddr>,
+    ) -> CaMsg {
+        let dbr_type = dbr_type as u16;
+        let header = CaHeader {
+            cmd: CaCmd::CaProtoEventCancel,
+            payload_size: 0,
+            data_type: dbr_type,
+            data_count: data_count,
+            param1: sid,
+            param2: subid,
+        };
+        CaMsg {
+            header: header,
+            payload: vec![],
+            src: None,
+            dest: dest.clone(),
+        }
+    }
 
     // -------------- getters --------------------
     pub fn header(self: &Self) -> &CaHeader {

@@ -1,3 +1,5 @@
+use crate::channel::meta::ChannelMeta;
+use crate::channel::monitor::{ChannelMonitor, ChannelMonitorState, MonitorCallback};
 use crate::context::context::get_context;
 use core::num;
 use std::net::SocketAddr;
@@ -12,37 +14,6 @@ use crate::channel::dbr::{ChannelAccessRights, ChannelSeverity, ChannelState, Ch
 use crate::channel::dbr::{DbrType, DbrValue};
 use log::{debug, error, warn};
 
-// channel monitor callback function
-pub type MonitorCallback = Arc<dyn Fn(&Channel) + Send + Sync + 'static>;
-
-struct ChannelMeta {
-    // state
-    state: ChannelState,
-    access_right: ChannelAccessRights,
-    // status, severity, and native dbr_type
-    status: ChannelStatus,
-    severity: ChannelSeverity,
-    dbr_type_native: DbrType,
-    data_count_native: u32,
-    // time
-    seconds_since_epoch: i32, // the Unix time, not epics time
-    nano_seconds: u32,
-    // data
-    units: String, // 8 C chars
-    precision: i16,
-    padding: i16,
-    // enum
-    number_of_string_used: i16,
-    strings: [String; 16], // 16 elements, each with up to 26 C chars
-    // limits
-    upper_display_limit: i16,
-    lower_display_limit: i16,
-    upper_alarm_limit: i16,
-    lower_alarm_limit: i16,
-    upper_warning_limit: i16,
-    lower_warning_limit: i16,
-}
-
 pub struct Channel {
     name: String,
     cid: u32,       // client ID
@@ -52,7 +23,7 @@ pub struct Channel {
     search_counter: AtomicU32,
     addr: RwLock<Option<SocketAddr>>,
     state_change_notifier: Notify,
-    monitor_callback: RwLock<Option<MonitorCallback>>,
+    monitor: Arc<ChannelMonitor>,
 }
 
 impl std::fmt::Display for Channel {
@@ -114,7 +85,12 @@ impl Channel {
             value: RwLock::new(None),
             addr: RwLock::new(None),
             state_change_notifier: Notify::new(),
-            monitor_callback: RwLock::new(None),
+            monitor: Arc::new(ChannelMonitor {
+                state: RwLock::new(ChannelMonitorState::NotRunning),
+                dbr_type: RwLock::new(DbrType::Double),
+                data_count: AtomicU32::new(0),
+                callback: RwLock::new(None),
+            }),
         }
     }
 
@@ -257,7 +233,11 @@ impl Channel {
                                 let dbr_type = DbrType::from_u16(dbr_type_num);
                                 match dbr_type {
                                     Some(dbr_type) => {
-                                        self.update_from_payload_buf(msg.payload(), num_elem, dbr_type);
+                                        self.update_from_payload_buf(
+                                            msg.payload(),
+                                            num_elem,
+                                            dbr_type,
+                                        );
                                     }
                                     None => {}
                                 }
@@ -273,7 +253,12 @@ impl Channel {
         }
     }
 
-    pub async fn start_to_monitor(self: &Self, dbr_type: Option<DbrType>, data_count: Option<u32>, callback: Option<MonitorCallback>) {
+    pub async fn start_to_monitor(
+        self: &Self,
+        dbr_type: Option<DbrType>,
+        data_count: Option<u32>,
+        callback: Option<MonitorCallback>,
+    ) {
         // block until state becomes Created
         self.wait_state_change(ChannelState::Created).await;
 
@@ -294,11 +279,14 @@ impl Channel {
 
         match dest {
             Some(dest) => {
-                let msg: CaMsg = CaMsg::build_event_add(dbr_type, data_count, sid, subid, &vec![dest]);
+                let msg: CaMsg =
+                    CaMsg::build_event_add(dbr_type, data_count, sid, subid, &vec![dest]);
                 let tcp: Option<Arc<crate::tcp::tcp::TCP>> = context.tcps().tcp(&dest);
                 match tcp {
                     Some(tcp) => {
+                        // set monitor's callback
                         self.set_monitor_callback(callback);
+                        self.set_monitor_state(ChannelMonitorState::Starting);
                         // send out CA_PROTO_EVENT_ADD
                         tcp.send_msgs(vec![msg]).await;
                     }
@@ -309,12 +297,73 @@ impl Channel {
         }
     }
 
-    // ------------------ data -------------------
+    pub async fn cancel_monitor(self: &Self) {
+        if self.monitor_state() == ChannelMonitorState::NotRunning {
+            // already stopped
+            return;
+        }
+        // clear the monitor related stuff
+        self.set_monitor_callback(None);
+        self.set_monitor_state(ChannelMonitorState::NotRunning);
+
+        // send CA_PROTO_EVENT_CANCEL
+        let dbr_type = self.monitor_data_type();
+        let data_count = self.monitor_data_count();
+
+        let sid = self.sid();
+        let subid = self.cid();
+        let dest = self.addr();
+        let context = get_context();
+
+        match dest {
+            Some(dest) => {
+                let msg: CaMsg =
+                    CaMsg::build_event_cancel(dbr_type, data_count, sid, subid, &vec![dest]);
+                let tcp: Option<Arc<crate::tcp::tcp::TCP>> = context.tcps().tcp(&dest);
+                match tcp {
+                    Some(tcp) => {
+                        // send out CA_PROTO_EVENT_CANCEL
+                        tcp.send_msgs(vec![msg]).await;
+                    }
+                    None => {}
+                }
+            }
+            None => {}
+        }
+    }
+
+
+    // ------------- data setter ----------------
+
+    pub fn set_sid(&self, new_sid: u32) {
+        self.sid.store(new_sid, Ordering::Relaxed);
+    }
+
+    pub fn set_addr(self: &Self, new_addr: Option<SocketAddr>) {
+        *self.addr.write().unwrap() = new_addr;
+    }
+
+    pub fn set_value(&self, new_value: Option<DbrValue>) {
+        *self.value.write().unwrap() = new_value;
+    }
+
+
+    pub fn increment_search_counter(&self) -> u32 {
+        self.search_counter.fetch_add(1, Ordering::Relaxed) + 1
+    }
+
+    pub fn reset_search_counter(&self) -> u32 {
+        self.search_counter.swap(0, Ordering::Relaxed)
+    }
+
+
+    // --------------- data getter ---------------------
+    
     pub fn name(&self) -> &str {
         &self.name
     }
 
-    fn meta(&self) -> RwLockReadGuard<'_, ChannelMeta> {
+    pub fn meta(&self) -> RwLockReadGuard<'_, ChannelMeta> {
         self.meta.read().unwrap()
     }
 
@@ -322,11 +371,107 @@ impl Channel {
         self.meta.write().unwrap()
     }
 
-    // ------------- data setter ----------------
-
-    pub fn set_sid(&self, new_sid: u32) {
-        self.sid.store(new_sid, Ordering::Relaxed);
+    pub fn value(&self) -> RwLockReadGuard<'_, Option<DbrValue>> {
+        self.value.read().unwrap()
     }
+
+    pub fn cid(&self) -> u32 {
+        self.cid
+    }
+
+    pub fn sid(&self) -> u32 {
+        self.sid.load(Ordering::Relaxed)
+    }
+
+    pub fn search_counter(&self) -> u32 {
+        self.search_counter.load(Ordering::Relaxed)
+    }
+
+    pub fn addr(self: &Self) -> Option<SocketAddr> {
+        *self.addr.read().unwrap()
+    }
+
+    pub fn state_change_notifier(self: &Self) -> &Notify {
+        &self.state_change_notifier
+    }
+
+    // -------------------- meta -------------------
+
+    // getters
+
+    pub fn state(&self) -> ChannelState {
+        self.meta().state
+    }
+
+    pub fn status(&self) -> ChannelStatus {
+        self.meta().status
+    }
+
+    pub fn severity(&self) -> ChannelSeverity {
+        self.meta().severity
+    }
+
+    pub fn dbr_type_native(self: &Self) -> DbrType {
+        self.meta().dbr_type_native
+    }
+
+    pub fn seconds_since_epoch(&self) -> i32 {
+        self.meta().seconds_since_epoch
+    }
+
+    pub fn data_count_native(&self) -> u32 {
+        self.meta().data_count_native
+    }
+
+    pub fn nano_seconds(&self) -> u32 {
+        self.meta().nano_seconds
+    }
+
+    pub fn units(&self) -> String {
+        self.meta().units.clone()
+    }
+
+    pub fn precision(&self) -> i16 {
+        self.meta().precision
+    }
+
+    pub fn padding(&self) -> i16 {
+        self.meta().padding
+    }
+
+    pub fn number_of_string_used(&self) -> i16 {
+        self.meta().number_of_string_used
+    }
+
+    pub fn strings(&self) -> [String; 16] {
+        self.meta().strings.clone()
+    }
+
+    pub fn upper_display_limit(&self) -> i16 {
+        self.meta().upper_display_limit
+    }
+
+    pub fn lower_display_limit(&self) -> i16 {
+        self.meta().lower_display_limit
+    }
+
+    pub fn upper_alarm_limit(&self) -> i16 {
+        self.meta().upper_alarm_limit
+    }
+
+    pub fn lower_alarm_limit(&self) -> i16 {
+        self.meta().lower_alarm_limit
+    }
+
+    pub fn upper_warning_limit(&self) -> i16 {
+        self.meta().upper_warning_limit
+    }
+
+    pub fn lower_warning_limit(&self) -> i16 {
+        self.meta().lower_warning_limit
+    }
+
+    // setters
 
     pub fn set_state(&self, new_state: ChannelState) {
         self.meta_mut().state = new_state;
@@ -405,130 +550,52 @@ impl Channel {
         self.meta_mut().access_right = access_right;
     }
 
-    pub fn set_addr(self: &Self, new_addr: Option<SocketAddr>) {
-        *self.addr.write().unwrap() = new_addr;
+    // --------- monitor -------------
+
+    // getters 
+
+    pub fn monitor(self: &Self) -> Arc<ChannelMonitor> {
+        self.monitor.clone()
     }
 
-    pub fn set_value(&self, new_value: Option<DbrValue>) {
-        *self.value.write().unwrap() = new_value;
+    pub fn monitor_callback(self: &Self) -> Option<MonitorCallback> {
+        let monitor = self.monitor();
+        monitor.callback.read().unwrap().clone()
     }
+
+    pub fn monitor_data_count(self: &Self) -> u32 {
+        self.monitor().data_count.load(Ordering::Relaxed)
+    }
+
+    pub fn monitor_data_type(self: &Self) -> DbrType {
+        self.monitor().dbr_type.read().unwrap().clone()
+    }
+
+    pub fn monitor_state(self: &Self) -> ChannelMonitorState {
+        self.monitor().state.read().unwrap().clone()
+    }
+
+    // setters
 
 
     pub fn set_monitor_callback(self: &Self, callback: Option<MonitorCallback>) {
-        *self.monitor_callback.write().unwrap() = callback;
+        *self.monitor().callback.write().unwrap() = callback;
     }
 
-    // ------------- data getter ----------------
-
-    pub fn state(&self) -> ChannelState {
-        self.meta().state
+    pub fn set_monitor_data_count(self: &Self, count: u32) {
+        self.monitor().data_count.store(count, Ordering::Relaxed);
     }
 
-    pub fn value(&self) -> RwLockReadGuard<'_, Option<DbrValue>> {
-        self.value.read().unwrap()
+    pub fn set_monitor_data_type(self: &Self, data_type: DbrType) {
+        *self.monitor().dbr_type.write().unwrap() = data_type;
     }
 
-    pub fn status(&self) -> ChannelStatus {
-        self.meta().status
-    }
-
-    pub fn severity(&self) -> ChannelSeverity {
-        self.meta().severity
-    }
-
-    pub fn dbr_type_native(self: &Self) -> DbrType {
-        self.meta().dbr_type_native
-    }
-
-    pub fn seconds_since_epoch(&self) -> i32 {
-        self.meta().seconds_since_epoch
-    }
-
-    pub fn data_count_native(&self) -> u32 {
-        self.meta().data_count_native
-    }
-
-    pub fn nano_seconds(&self) -> u32 {
-        self.meta().nano_seconds
-    }
-
-    pub fn units(&self) -> String {
-        self.meta().units.clone()
-    }
-
-    pub fn precision(&self) -> i16 {
-        self.meta().precision
-    }
-
-    pub fn padding(&self) -> i16 {
-        self.meta().padding
-    }
-
-    pub fn number_of_string_used(&self) -> i16 {
-        self.meta().number_of_string_used
-    }
-
-    pub fn strings(&self) -> [String; 16] {
-        self.meta().strings.clone()
-    }
-
-    pub fn upper_display_limit(&self) -> i16 {
-        self.meta().upper_display_limit
-    }
-
-    pub fn lower_display_limit(&self) -> i16 {
-        self.meta().lower_display_limit
-    }
-
-    pub fn upper_alarm_limit(&self) -> i16 {
-        self.meta().upper_alarm_limit
-    }
-
-    pub fn lower_alarm_limit(&self) -> i16 {
-        self.meta().lower_alarm_limit
-    }
-
-    pub fn upper_warning_limit(&self) -> i16 {
-        self.meta().upper_warning_limit
-    }
-
-    pub fn lower_warning_limit(&self) -> i16 {
-        self.meta().lower_warning_limit
-    }
-
-    pub fn cid(&self) -> u32 {
-        self.cid
-    }
-
-    pub fn sid(&self) -> u32 {
-        self.sid.load(Ordering::Relaxed)
-    }
-
-    pub fn increment_search_counter(&self) -> u32 {
-        self.search_counter.fetch_add(1, Ordering::Relaxed) + 1
-    }
-
-    pub fn reset_search_counter(&self) -> u32 {
-        self.search_counter.swap(0, Ordering::Relaxed)
-    }
-
-    pub fn search_counter(&self) -> u32 {
-        self.search_counter.load(Ordering::Relaxed)
-    }
-
-    pub fn addr(self: &Self) -> Option<SocketAddr> {
-        *self.addr.read().unwrap()
-    }
-
-    pub fn state_change_notifier(self: &Self) -> &Notify {
-        &self.state_change_notifier
-    }
-
-    pub fn monitor_callback(self: &Self) -> RwLockReadGuard<'_, Option<MonitorCallback>> {
-        self.monitor_callback.read().unwrap()
+    pub fn set_monitor_state(self: &Self, state: ChannelMonitorState) {
+        *self.monitor().state.write().unwrap() = state;
     }
 
     // ------------- event ----------------
+    
     async fn wait_state_change(self: &Self, state: ChannelState) {
         loop {
             let notified = self.state_change_notifier().notified();
@@ -549,5 +616,4 @@ impl Channel {
             // no callback
         }
     }
-
 }
