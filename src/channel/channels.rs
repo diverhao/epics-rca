@@ -196,7 +196,7 @@ impl Channels {
             if channel_state != ChannelState::NeverConnected
                 && channel_state != ChannelState::NameSearching
             {
-                debug!("Channel {name} is already found, skip name search");
+                debug!("Channel {name} is already found ({:?}), skip name search", channel_state);
                 continue;
             }
             let search_counter = channel.search_counter();

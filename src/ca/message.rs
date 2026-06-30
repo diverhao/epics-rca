@@ -196,6 +196,23 @@ impl CaMsg {
         }
     }
 
+    pub fn build_echo(dest: &Vec<SocketAddr>) -> CaMsg {
+        let header = CaHeader {
+            cmd: CaCmd::CaProtoEcho,
+            payload_size: 0,
+            data_type: 0,
+            data_count: 0,
+            param1: 0,
+            param2: 0,
+        };
+        CaMsg {
+            header: header,
+            payload: vec![],
+            src: None,
+            dest: dest.clone(),
+        }
+    }
+
     pub fn build_version(dest: &Vec<SocketAddr>) -> CaMsg {
         let header = CaHeader {
             cmd: CaCmd::CaProtoVersion,
@@ -386,7 +403,6 @@ impl CaMsg {
             src: None,
             dest: dest.clone(),
         }
-
     }
 
     // -------------- getters --------------------

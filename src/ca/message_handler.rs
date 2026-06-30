@@ -36,7 +36,6 @@ pub async fn handle_udp_msg(src: &SocketAddr, msg: CaMsg) {
         CaCmd::CaProtoVersion => handle_ca_proto_version(msg),
         CaCmd::CaProtoSearch => handle_ca_proto_search(msg).await,
         CaCmd::CaProtoNotFound => handle_ca_proto_not_found(msg),
-        CaCmd::CaProtoEcho => handle_ca_proto_echo(msg),
         CaCmd::CaProtoRsrvIsUp => handle_ca_proto_rsrv_is_up(msg),
         CaCmd::CaRepeaterConfirm => handle_ca_repeater_confirm(msg),
         CaCmd::CaRepeaterRegister => handle_ca_repeater_register(msg),
@@ -48,6 +47,7 @@ pub async fn handle_tcp_msg(src: &SocketAddr, msg: CaMsg) {
     let cmd = msg.header().cmd;
     debug!("\nReceived from {src}: {msg}");
     match cmd {
+        CaCmd::CaProtoEcho => handle_ca_proto_echo(msg),
         CaCmd::CaProtoEventAdd => handle_ca_proto_event_add(msg),
         CaCmd::CaProtoEventCancel => handle_ca_proto_event_cancel(msg),
         CaCmd::CaProtoRead => handle_ca_proto_read(msg),
@@ -70,6 +70,23 @@ pub async fn handle_tcp_msg(src: &SocketAddr, msg: CaMsg) {
         CaCmd::CaProtoCreateChFail => handle_ca_proto_create_ch_fail(msg),
         CaCmd::CaProtoServerDisconn => handle_ca_proto_server_disconn(msg),
         _ => {}
+    }
+}
+
+fn handle_ca_proto_echo(msg: CaMsg) {
+    // find the tcp and mark it alive
+    let addr = msg.src().as_ref();
+    match addr {
+        Some(addr) => {
+            let tcp = get_context().tcps().tcp(addr);
+            match tcp {
+                Some(tcp) => {
+                    tcp.set_alive(true);
+                }
+                None => {}
+            }
+        }
+        None => {}
     }
 }
 
@@ -164,13 +181,16 @@ async fn handle_ca_proto_create_chan(msg: CaMsg) {
                 return;
             }
             channel.set_sid(sid);
-            channel.set_state(ChannelState::Created, true);
             channel.set_dbr_type_native(dbr_type);
             channel.set_data_count_native(data_count);
+            // do it when everything is ready
+            channel.set_state(ChannelState::Created, true);
 
             // if the channel monitor is reconnecting, resume
             if channel.monitor_state() == MonitorState::Reconnecting {
-                channel.start_to_monitor(None, None, None).await;
+                tokio::spawn(async move  {
+                    channel.start_to_monitor(None, None, None).await;
+                });
             }
         }
         None => {
@@ -239,8 +259,6 @@ fn handle_ca_proto_clear_channel(_msg: CaMsg) {
 }
 
 fn handle_ca_proto_not_found(_msg: CaMsg) {}
-
-fn handle_ca_proto_echo(_msg: CaMsg) {}
 
 fn handle_ca_proto_rsrv_is_up(_msg: CaMsg) {}
 

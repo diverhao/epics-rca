@@ -144,35 +144,39 @@ impl Channel {
         let context = get_context();
         let channels = context.channels();
 
-        // Reset all data, clear IO, don't notify the state change
-        self.reset(false, MonitorState::NotRunning);
+        let addr: Option<SocketAddr> = self.addr();
+        let sid = self.sid();
+        let cid = self.cid();
+        let had_monitor = !(self.monitor().state() == MonitorState::NotRunning);
+
+        // Reset all data, clear IO, 
+        // since we are destroying the channel, no need to notify the state change
+        self.reset(false);
 
         // Mark state as Destroyed and notify waiters.
         self.set_state(ChannelState::Destroyed, true);
 
         // Cancel monitor if there is one
-        let had_monitor = !(self.monitor().state() == MonitorState::NotRunning);
         if had_monitor {
-            self.cancel_monitor(MonitorState::NotRunning).await;
+            self.cancel_monitor(MonitorState::NotRunning, sid, cid, addr).await;
         }
 
-        let addr = self.addr();
         match addr {
             Some(addr) => {
                 let tcp = get_context().tcps().tcp(&addr);
                 match tcp {
                     Some(tcp) => {
                         // Tell server to clear channel: Send CA_PROTO_CLEAR_CHANNEL
-                        let msg = CaMsg::build_clear_channel(self.sid(), self.cid(), &vec![addr]);
+                        let msg = CaMsg::build_clear_channel(sid, cid, &vec![addr]);
                         match tcp.send_msgs(vec![msg]).await {
                             Ok(_) => {}
                             Err(error) => {}
                         };
                         // Remove cid from the associated TCP.
-                        tcp.remove_cid(self.cid());
+                        tcp.remove_cid(cid);
                         // if TCP has no channel, disconnect it
                         if tcp.cids().len() == 0 {
-                            tcp.disconnect().await;
+                            tcp.disconnect(true, true).await;
                         }
                     }
                     None => {}
@@ -198,34 +202,39 @@ impl Channel {
         debug!("Reconnecting channel {}", self.name());
 
         let had_monitor = !(self.monitor().state() == MonitorState::NotRunning);
+        let sid = self.sid();
+        let subid = self.cid();
+        let addr = self.addr();
 
         // Set monitor state, no need to notify the server because in this case the TCP is already broken
-        self.reset(true, MonitorState::Reconnecting);
+        self.reset(true);
+        println!("{:?}", self.state());
 
         // cancel monitor if there is a monitor
         if had_monitor {
-            self.cancel_monitor(MonitorState::Reconnecting).await;
+            self.cancel_monitor(MonitorState::Reconnecting, sid, subid, addr).await;
         }
     }
 
     /**
-     * Reset channel's meta data, monitor data, and clear the IOs
-     *
+     * Reset channel's meta data, and clear the IOs.
+     * 
      * Note: it sets channel's state to NameSearching
+     *       it does not reset monitor's data
      */
-    pub fn reset(self: &Self, notify_state: bool, monitor_state: MonitorState) {
+    pub fn reset(self: &Self, notify_state: bool) {
         self.set_sid(0);
         self.set_search_counter(1);
         self.meta().reset();
         self.set_value(None);
         self.set_addr(None);
-        if monitor_state == MonitorState::NotRunning {
-            self.monitor().set_state(monitor_state);
-        } else if monitor_state == MonitorState::Reconnecting
-            && self.monitor_state() != MonitorState::NotRunning
-        {
-            self.monitor().set_state(monitor_state);
-        }
+        // if monitor_state == MonitorState::NotRunning {
+        //     self.monitor().set_state(monitor_state);
+        // } else if monitor_state == MonitorState::Reconnecting
+        //     && self.monitor_state() != MonitorState::NotRunning
+        // {
+        //     self.monitor().set_state(monitor_state);
+        // }
         get_context().channels().remove_io_by_cid(self.cid());
         self.set_state(ChannelState::NameSearching, notify_state);
     }
@@ -377,7 +386,7 @@ impl Channel {
     /**
      * Reset monitor data, and tell server to cancel the monitor
      */
-    pub async fn cancel_monitor(self: &Self, new_state: MonitorState) {
+    pub async fn cancel_monitor(self: &Self, new_state: MonitorState, sid: u32, subid: u32, dest: Option<SocketAddr>) {
         if self.monitor_state() == MonitorState::NotRunning
             || self.monitor_state() == MonitorState::Reconnecting
         {
@@ -385,7 +394,7 @@ impl Channel {
             return;
         }
 
-        // set monitor state
+        // set monitor's new state: NotRunning (completely stop), or Reconnecting (reconnect)
         if new_state == MonitorState::NotRunning || new_state == MonitorState::Reconnecting {
             self.monitor().set_state(new_state);
         } else {
@@ -395,9 +404,6 @@ impl Channel {
 
         let dbr_type = self.monitor_data_type();
         let data_count = self.monitor_data_count();
-        let sid = self.sid();
-        let subid = self.cid();
-        let dest = self.addr();
         let context = get_context();
         match dest {
             Some(dest) => {
