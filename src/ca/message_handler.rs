@@ -2,13 +2,13 @@ use crate::ca::cmd::CaCmd;
 use crate::ca::header::CaHeader;
 use crate::ca::message::{CA_MINOR_VERSION, CaMsg, SearchReplyFlag};
 use crate::channel;
-use crate::channel::monitor::{Monitor, MonitorState};
 use crate::channel::dbr::{ChannelAccessRights, ChannelSeverity, ChannelState, ChannelStatus};
 use crate::channel::dbr::{DbrType, DbrValue};
+use crate::channel::monitor::{Monitor, MonitorState};
 use crate::context::context::get_context;
 use crate::udp::udp::UDP;
-use ::log::debug;
 use ::log::error;
+use ::log::{debug, warn};
 use std::net::IpAddr;
 use std::net::Ipv4Addr;
 use std::net::SocketAddr;
@@ -61,7 +61,7 @@ pub async fn handle_tcp_msg(src: &SocketAddr, msg: CaMsg) {
         CaCmd::CaProtoClearChannel => handle_ca_proto_clear_channel(msg),
         CaCmd::CaProtoReadNotify => handle_ca_proto_read_notify(msg),
         CaCmd::CaProtoReadBuild => handle_ca_proto_read_build(msg),
-        CaCmd::CaProtoCreateChan => handle_ca_proto_create_chan(msg),
+        CaCmd::CaProtoCreateChan => handle_ca_proto_create_chan(msg).await,
         CaCmd::CaProtoWriteNotify => handle_ca_proto_write_notify(msg),
         CaCmd::CaProtoClientName => handle_ca_proto_client_name(msg),
         CaCmd::CaProtoHostName => handle_ca_proto_host_name(msg),
@@ -99,7 +99,7 @@ pub async fn handle_ca_proto_search(msg: CaMsg) {
                         return;
                     }
                     // update state and search counter
-                    channel.set_state(ChannelState::NameFound);
+                    channel.set_state(ChannelState::NameFound, true);
                     channel.reset_search_counter();
 
                     let server_addr = SocketAddr::new(src.ip(), server_port);
@@ -143,7 +143,7 @@ fn handle_ca_proto_access_rights(msg: CaMsg) {
     }
 }
 
-fn handle_ca_proto_create_chan(msg: CaMsg) {
+async fn handle_ca_proto_create_chan(msg: CaMsg) {
     let header = msg.header();
     let Some(dbr_type) = DbrType::from_u16(header.data_type) else {
         return;
@@ -164,11 +164,18 @@ fn handle_ca_proto_create_chan(msg: CaMsg) {
                 return;
             }
             channel.set_sid(sid);
-            channel.set_state(ChannelState::Created);
+            channel.set_state(ChannelState::Created, true);
             channel.set_dbr_type_native(dbr_type);
             channel.set_data_count_native(data_count);
+
+            // if the channel monitor is reconnecting, resume
+            if channel.monitor_state() == MonitorState::Reconnecting {
+                channel.start_to_monitor(None, None, None).await;
+            }
         }
-        None => {}
+        None => {
+            warn!("Cannot find channel with cid {}", cid);
+        }
     }
 }
 
@@ -214,7 +221,7 @@ fn handle_ca_proto_event_add(msg: CaMsg) {
     // update value and meta first
     channel.update_from_payload_buf(msg.payload(), num_elem, dbr_type);
 
-    // update the monitor state
+    // update the monitor state each time
     channel.set_monitor_state(MonitorState::Running);
     channel.set_monitor_data_count(data_count);
     channel.set_monitor_data_type(dbr_type);
@@ -230,7 +237,6 @@ fn handle_ca_proto_event_cancel(msg: CaMsg) {
 fn handle_ca_proto_clear_channel(_msg: CaMsg) {
     // do nothing
 }
-
 
 fn handle_ca_proto_not_found(_msg: CaMsg) {}
 
@@ -257,7 +263,6 @@ fn handle_ca_proto_events_on(_msg: CaMsg) {}
 fn handle_ca_proto_read_sync(_msg: CaMsg) {}
 
 fn handle_ca_proto_error(_msg: CaMsg) {}
-
 
 fn handle_ca_proto_read_build(_msg: CaMsg) {}
 

@@ -20,7 +20,7 @@ pub struct Channels {
     by_name: RwLock<HashMap<String, Arc<Channel>>>,
     by_cid: RwLock<HashMap<u32, Arc<Channel>>>,
     next_cid: AtomicU32,
-    next_ioid: AtomicU32, // read and write
+    next_ioid: AtomicU32,                            // read and write
     ios: RwLock<HashMap<u32, (Sender<CaMsg>, u32)>>, // HashMap<ioid, (Sender<msg>, cid)>
 }
 
@@ -60,7 +60,7 @@ impl Channels {
     pub async fn destroy_channel_by_cid(self: &Self, cid: u32) {
         let channel = self.channel_by_cid(cid);
         match channel {
-            Some(channel) => {channel.destroy().await}
+            Some(channel) => channel.destroy().await,
             None => {}
         }
     }
@@ -68,7 +68,7 @@ impl Channels {
     pub async fn destroy_channel_by_name(self: &Self, name: String) {
         let channel = self.channel_by_name(&name);
         match channel {
-            Some(channel) => {channel.destroy().await}
+            Some(channel) => channel.destroy().await,
             None => {}
         }
     }
@@ -80,7 +80,79 @@ impl Channels {
         }
     }
 
-    // --------------- network -----------------
+    // ------------- IO ------------------------
+
+    pub fn clear_ios(self: &Self) {
+        self.ios_mut().clear();
+    }
+
+    pub fn remove_io_by_ioid(self: &Self, ioid: u32) -> Option<(Sender<CaMsg>, u32)> {
+        self.ios_mut().remove(&ioid)
+    }
+
+    pub fn remove_io_by_cid(self: &Self, cid: u32) {
+        self.ios_mut().retain(|_, (_, io_cid)| *io_cid != cid);
+    }
+
+    fn ios(self: &Self) -> RwLockReadGuard<'_, HashMap<u32, (Sender<CaMsg>, u32)>> {
+        self.ios.read().unwrap()
+    }
+
+    fn ios_mut(self: &Self) -> RwLockWriteGuard<'_, HashMap<u32, (Sender<CaMsg>, u32)>> {
+        self.ios.write().unwrap()
+    }
+
+    pub fn add_io(self: &Self, ioid: u32, tx: Sender<CaMsg>, cid: u32) {
+        self.ios_mut().insert(ioid, (tx, cid));
+    }
+
+    pub fn next_ioid(self: &Self) -> u32 {
+        let id = self.next_ioid.fetch_add(1, Ordering::Relaxed);
+        id
+    }
+
+    // -------------- channels -----------------
+
+    pub fn by_name(self: &Self) -> RwLockReadGuard<'_, HashMap<String, Arc<Channel>>> {
+        self.by_name.read().unwrap()
+    }
+
+    pub fn by_cid(self: &Self) -> RwLockReadGuard<'_, HashMap<u32, Arc<Channel>>> {
+        self.by_cid.read().unwrap()
+    }
+
+    pub fn by_name_mut(self: &Self) -> RwLockWriteGuard<'_, HashMap<String, Arc<Channel>>> {
+        self.by_name.write().unwrap()
+    }
+
+    pub fn by_cid_mut(self: &Self) -> RwLockWriteGuard<'_, HashMap<u32, Arc<Channel>>> {
+        self.by_cid.write().unwrap()
+    }
+
+    pub fn remove_by_cid_channel(self: &Self, cid: u32) {
+        self.by_cid_mut().remove(&cid);
+    }
+
+    pub fn remove_by_name_channel(self: &Self, name: String) {
+        self.by_name_mut().remove(&name);
+    }
+
+    pub fn channel_by_cid(self: &Self, cid: u32) -> Option<Arc<Channel>> {
+        let by_cid = self.by_cid();
+        by_cid.get(&cid).cloned()
+    }
+
+    pub fn channel_by_name(self: &Self, name: &str) -> Option<Arc<Channel>> {
+        let by_name = self.by_name();
+        by_name.get(name).cloned()
+    }
+
+    pub fn next_cid(self: &Self) -> u32 {
+        let id = self.next_cid.fetch_add(1, Ordering::Relaxed);
+        id
+    }
+
+    // --------------- search channel -----------------
 
     /**
      * Start periodic task to search
@@ -138,7 +210,7 @@ impl Channels {
 
             match msg {
                 Ok(msg) => {
-                    channel.set_state(ChannelState::NameSearching);
+                    channel.set_state(ChannelState::NameSearching, true);
                     if buf_len + msg.size() as u32 > MAX_UDP_SEND as u32 {
                         udp.send_msgs(&msgs).await;
                         msgs.clear();
@@ -155,72 +227,6 @@ impl Channels {
         if msgs.len() > 1 {
             udp.send_msgs(&msgs).await;
         }
-    }
-
-    // ------------- getters --------------------
-
-    pub fn by_name(self: &Self) -> RwLockReadGuard<'_, HashMap<String, Arc<Channel>>> {
-        self.by_name.read().unwrap()
-    }
-
-    pub fn by_cid(self: &Self) -> RwLockReadGuard<'_, HashMap<u32, Arc<Channel>>> {
-        self.by_cid.read().unwrap()
-    }
-
-    pub fn by_name_mut(self: &Self) -> RwLockWriteGuard<'_, HashMap<String, Arc<Channel>>> {
-        self.by_name.write().unwrap()
-    }
-
-    pub fn by_cid_mut(self: &Self) -> RwLockWriteGuard<'_, HashMap<u32, Arc<Channel>>> {
-        self.by_cid.write().unwrap()
-    }
-
-    fn ios(self: &Self) -> RwLockReadGuard<'_, HashMap<u32, (Sender<CaMsg>, u32)>> {
-        self.ios.read().unwrap()
-    }
-
-    fn ios_mut(self: &Self) -> RwLockWriteGuard<'_, HashMap<u32, (Sender<CaMsg>, u32)>> {
-        self.ios.write().unwrap()
-    }
-
-    pub fn add_io(self: &Self, ioid: u32, tx: Sender<CaMsg>, cid: u32) {
-        self.ios_mut().insert(ioid, (tx, cid));
-    }
-
-    pub fn remove_io_by_ioid(self: &Self, ioid: u32) -> Option<(Sender<CaMsg>, u32)> {
-        self.ios_mut().remove(&ioid)
-    }
-
-    pub fn remove_io_by_cid(self: &Self, cid: u32) {
-        self.ios_mut().retain(|_, (_, io_cid)| *io_cid != cid);
-    }
-
-    pub fn remove_by_cid_channel(self: &Self, cid: u32) {
-        self.by_cid_mut().remove(&cid);
-    }
-
-    pub fn remove_by_name_channel(self: &Self, name: String) {
-        self.by_name_mut().remove(&name);
-    }
-
-    pub fn channel_by_cid(self: &Self, cid: u32) -> Option<Arc<Channel>> {
-        let by_cid = self.by_cid();
-        by_cid.get(&cid).cloned()
-    }
-
-    pub fn channel_by_name(self: &Self, name: &str) -> Option<Arc<Channel>> {
-        let by_name = self.by_name();
-        by_name.get(name).cloned()
-    }
-
-    pub fn next_cid(self: &Self) -> u32 {
-        let id = self.next_cid.fetch_add(1, Ordering::Relaxed);
-        id
-    }
-
-    pub fn next_ioid(self: &Self) -> u32 {
-        let id = self.next_ioid.fetch_add(1, Ordering::Relaxed);
-        id
     }
 }
 

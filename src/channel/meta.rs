@@ -42,6 +42,30 @@ pub struct Meta {
 }
 
 impl Meta {
+    pub fn new() -> Arc<Meta> {
+        Arc::new(Meta {
+            state: RwLock::new(ChannelState::NeverConnected),
+            access_right: RwLock::new(ChannelAccessRights::None),
+            status: RwLock::new(ChannelStatus::NoAlarm),
+            severity: RwLock::new(ChannelSeverity::NoAlarm),
+            dbr_type_native: RwLock::new(DbrType::Double),
+            data_count_native: RwLock::new(0),
+            seconds_since_epoch: RwLock::new(0),
+            nano_seconds: RwLock::new(0),
+            units: RwLock::new(String::new()),
+            precision: RwLock::new(0),
+            padding: RwLock::new(0),
+            number_of_string_used: RwLock::new(0),
+            strings: RwLock::new(std::array::from_fn(|_| String::new())),
+            upper_display_limit: RwLock::new(0),
+            lower_display_limit: RwLock::new(0),
+            upper_alarm_limit: RwLock::new(0),
+            lower_alarm_limit: RwLock::new(0),
+            upper_warning_limit: RwLock::new(0),
+            lower_warning_limit: RwLock::new(0),
+        })
+    }
+
     // getters
 
     pub fn state(&self) -> ChannelState {
@@ -121,6 +145,27 @@ impl Meta {
     }
 
     // setters
+    pub fn reset(self: &Self) {
+        self.set_state(ChannelState::NameSearching);
+        self.set_access_right(ChannelAccessRights::None);
+        self.set_status(ChannelStatus::NoAlarm);
+        self.set_severity(ChannelSeverity::NoAlarm);
+        self.set_dbr_type_native(DbrType::Double);
+        self.set_data_count_native(0);
+        self.set_seconds_since_epoch(0);
+        self.set_nano_seconds(0);
+        self.set_units(String::new());
+        self.set_precision(0);
+        self.set_padding(0);
+        self.set_number_of_string_used(0);
+        self.set_strings(std::array::from_fn(|_| String::new()));
+        self.set_upper_display_limit(0);
+        self.set_lower_display_limit(0);
+        self.set_upper_alarm_limit(0);
+        self.set_lower_alarm_limit(0);
+        self.set_upper_warning_limit(0);
+        self.set_lower_warning_limit(0);
+    }
 
     pub fn set_state(&self, new_state: ChannelState) {
         *self.state.write().unwrap() = new_state;
@@ -322,9 +367,11 @@ impl Channel {
 
     // --------------- setters -------------------
 
-    pub fn set_state(&self, new_state: ChannelState) {
+    pub fn set_state(&self, new_state: ChannelState, notify_state: bool) {
         self.meta().set_state(new_state);
-        self.state_change_notifier().notify_waiters();
+        if notify_state {
+            self.state_change_notifier().notify_waiters();
+        }
     }
 
     pub fn set_status(&self, new_status: ChannelStatus) {

@@ -21,16 +21,25 @@ pub enum MonitorState {
     NotRunning,
     Starting,
     Running,
+    Reconnecting,
 }
 
 pub struct Monitor {
     pub state: RwLock<MonitorState>,
-    pub dbr_type: RwLock<DbrType>,
+    pub data_type: RwLock<DbrType>,
     pub data_count: AtomicU32,
     pub callback: RwLock<Option<MonitorCallback>>,
 }
 
 impl Monitor {
+    pub fn new() -> Arc<Monitor> {
+        Arc::new(Monitor {
+            state: RwLock::new(MonitorState::NotRunning),
+            data_type: RwLock::new(DbrType::Double),
+            data_count: AtomicU32::new(0),
+            callback: RwLock::new(None),
+        })
+    }
 
     // ---------------- getters -------------------
 
@@ -47,7 +56,7 @@ impl Monitor {
     }
 
     pub fn data_type(self: &Self) -> DbrType {
-        self.dbr_type.read().unwrap().clone()
+        self.data_type.read().unwrap().clone()
     }
 
     // ---------------- setters ------------------
@@ -61,7 +70,7 @@ impl Monitor {
     }
 
     pub fn set_data_type(self: &Self, data_type: DbrType) {
-        *self.dbr_type.write().unwrap() = data_type;
+        *self.data_type.write().unwrap() = data_type;
     }
 
     pub fn set_state(self: &Self, state: MonitorState) {
@@ -72,7 +81,7 @@ impl Monitor {
 impl std::fmt::Display for Monitor {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         let state = *self.state.read().unwrap();
-        let dbr_type = *self.dbr_type.read().unwrap();
+        let data_type = *self.data_type.read().unwrap();
         let data_count = self.data_count.load(Ordering::Relaxed);
         let callback = if self.callback.read().unwrap().is_some() {
             "Some"
@@ -82,7 +91,7 @@ impl std::fmt::Display for Monitor {
 
         writeln!(f, "Monitor {{")?;
         writeln!(f, "    state: {:?},", state)?;
-        writeln!(f, "    dbr_type: {:?},", dbr_type)?;
+        writeln!(f, "    data_type: {:?},", data_type)?;
         writeln!(f, "    data_count: {},", data_count)?;
         writeln!(f, "    callback: {}", callback)?;
         write!(f, "}}")

@@ -1,9 +1,11 @@
+use crate::ca;
 use crate::ca::message::CaMsg;
 use crate::channel::dbr::{ChannelAccessRights, ChannelSeverity, ChannelState, ChannelStatus};
 use crate::channel::dbr::{DbrType, DbrValue};
 use crate::channel::meta::Meta;
-use crate::channel::monitor::{Monitor, MonitorCallback, MonitorState};
+use crate::channel::monitor::{self, Monitor, MonitorCallback, MonitorState};
 use crate::context::context::get_context;
+use crate::tcp::tcp::TCP;
 use core::num;
 use log::{debug, error, warn};
 use std::net::SocketAddr;
@@ -32,36 +34,11 @@ impl Channel {
             cid: cid,
             sid: AtomicU32::new(0),
             search_counter: AtomicU32::new(1),
-            meta: Arc::new(Meta {
-                state: RwLock::new(ChannelState::NeverConnected),
-                access_right: RwLock::new(ChannelAccessRights::None),
-                status: RwLock::new(ChannelStatus::NoAlarm),
-                severity: RwLock::new(ChannelSeverity::NoAlarm),
-                dbr_type_native: RwLock::new(DbrType::Double),
-                data_count_native: RwLock::new(0),
-                seconds_since_epoch: RwLock::new(0),
-                nano_seconds: RwLock::new(0),
-                units: RwLock::new(String::new()),
-                precision: RwLock::new(0),
-                padding: RwLock::new(0),
-                number_of_string_used: RwLock::new(0),
-                strings: RwLock::new(std::array::from_fn(|_| String::new())),
-                upper_display_limit: RwLock::new(0),
-                lower_display_limit: RwLock::new(0),
-                upper_alarm_limit: RwLock::new(0),
-                lower_alarm_limit: RwLock::new(0),
-                upper_warning_limit: RwLock::new(0),
-                lower_warning_limit: RwLock::new(0),
-            }),
+            meta: Meta::new(),
             value: RwLock::new(None),
             addr: RwLock::new(None),
             state_change_notifier: Notify::new(),
-            monitor: Arc::new(Monitor {
-                state: RwLock::new(MonitorState::NotRunning),
-                dbr_type: RwLock::new(DbrType::Double),
-                data_count: AtomicU32::new(0),
-                callback: RwLock::new(None),
-            }),
+            monitor: Monitor::new(),
         }
     }
 
@@ -85,7 +62,7 @@ impl Channel {
         let cid = self.cid();
         match tcp {
             Some(tcp) => {
-                self.set_state(ChannelState::TcpConnected);
+                self.set_state(ChannelState::TcpConnected, true);
                 // add this channel to TCP
                 tcp.add_cid(cid);
                 // assign TCP to this channel
@@ -97,7 +74,7 @@ impl Channel {
                 // connect this tcp address
                 let tcps = get_context().tcps();
                 let tcp = tcps.create_tcp(addr).await;
-                self.set_state(ChannelState::TcpConnected);
+                self.set_state(ChannelState::TcpConnected, true);
                 // assign this channel to TCP
                 match tcp {
                     Ok(tcp) => {
@@ -111,7 +88,7 @@ impl Channel {
                     }
                     Err(_) => {
                         // tcp connection failed
-                        self.set_state(ChannelState::NameSearching);
+                        self.set_state(ChannelState::NameSearching, true);
                     }
                 }
             }
@@ -143,13 +120,18 @@ impl Channel {
                                 Err(_) => return,
                             };
 
-                        tcp.send_msgs(vec![
-                            version_msg,
-                            client_name_msg,
-                            host_name_msg,
-                            create_chan_msg,
-                        ])
-                        .await;
+                        match tcp
+                            .send_msgs(vec![
+                                version_msg,
+                                client_name_msg,
+                                host_name_msg,
+                                create_chan_msg,
+                            ])
+                            .await
+                        {
+                            Ok(_) => {}
+                            Err(error) => {}
+                        };
                     }
                     None => {}
                 }
@@ -162,15 +144,17 @@ impl Channel {
         let context = get_context();
         let channels = context.channels();
 
+        // Reset all data, clear IO, don't notify the state change
+        self.reset(false, MonitorState::NotRunning);
+
         // Mark state as Destroyed and notify waiters.
-        self.set_state(ChannelState::Destroyed);
-        self.state_change_notifier().notify_waiters();
+        self.set_state(ChannelState::Destroyed, true);
 
-        // Cancel monitor
-        self.cancel_monitor().await;
-
-        // Remove pending ios entries for this cid.
-        get_context().channels().remove_io_by_cid(self.cid());
+        // Cancel monitor if there is one
+        let had_monitor = !(self.monitor().state() == MonitorState::NotRunning);
+        if had_monitor {
+            self.cancel_monitor(MonitorState::NotRunning).await;
+        }
 
         let addr = self.addr();
         match addr {
@@ -178,11 +162,18 @@ impl Channel {
                 let tcp = get_context().tcps().tcp(&addr);
                 match tcp {
                     Some(tcp) => {
-                        // Send CA_PROTO_CLEAR_CHANNEL if sid != 0.
+                        // Tell server to clear channel: Send CA_PROTO_CLEAR_CHANNEL
                         let msg = CaMsg::build_clear_channel(self.sid(), self.cid(), &vec![addr]);
-                        tcp.send_msgs(vec![msg]).await;
+                        match tcp.send_msgs(vec![msg]).await {
+                            Ok(_) => {}
+                            Err(error) => {}
+                        };
                         // Remove cid from the associated TCP.
                         tcp.remove_cid(self.cid());
+                        // if TCP has no channel, disconnect it
+                        if tcp.cids().len() == 0 {
+                            tcp.disconnect().await;
+                        }
                     }
                     None => {}
                 }
@@ -196,6 +187,47 @@ impl Channel {
         // Remove from Channels.by_name and Channels.by_cid.
         channels.remove_by_cid_channel(self.cid());
         channels.remove_by_name_channel(self.name().to_string());
+    }
+
+    /**
+     * If there is unreconverable error in TCP, the TCP should already have been destroyed
+     *
+     * It is similar to destroy, but the channel's registration in Context is kept
+     */
+    pub async fn reconnect(self: &Self) {
+        debug!("Reconnecting channel {}", self.name());
+
+        let had_monitor = !(self.monitor().state() == MonitorState::NotRunning);
+
+        // Set monitor state, no need to notify the server because in this case the TCP is already broken
+        self.reset(true, MonitorState::Reconnecting);
+
+        // cancel monitor if there is a monitor
+        if had_monitor {
+            self.cancel_monitor(MonitorState::Reconnecting).await;
+        }
+    }
+
+    /**
+     * Reset channel's meta data, monitor data, and clear the IOs
+     *
+     * Note: it sets channel's state to NameSearching
+     */
+    pub fn reset(self: &Self, notify_state: bool, monitor_state: MonitorState) {
+        self.set_sid(0);
+        self.set_search_counter(1);
+        self.meta().reset();
+        self.set_value(None);
+        self.set_addr(None);
+        if monitor_state == MonitorState::NotRunning {
+            self.monitor().set_state(monitor_state);
+        } else if monitor_state == MonitorState::Reconnecting
+            && self.monitor_state() != MonitorState::NotRunning
+        {
+            self.monitor().set_state(monitor_state);
+        }
+        get_context().channels().remove_io_by_cid(self.cid());
+        self.set_state(ChannelState::NameSearching, notify_state);
     }
 
     // ------------------ get/put/monitor --------------
@@ -233,12 +265,13 @@ impl Channel {
                         let (tx, rx) = tokio::sync::oneshot::channel::<CaMsg>();
                         get_context().channels().add_io(ioid, tx, cid);
                         // send out CA_PROTO_READ_NOTIFY
-                        tcp.send_msgs(vec![msg]).await;
+                        match tcp.send_msgs(vec![msg]).await {
+                            Ok(_) => {}
+                            Err(error) => {}
+                        };
                         let msg = rx.await;
                         match msg {
                             Ok(msg) => {
-                                // todo: decode the payload!!
-                                debug!("{msg}");
                                 let num_elem = msg.header().data_count;
                                 let dbr_type_num = msg.header().data_type;
                                 let dbr_type = DbrType::from_u16(dbr_type_num);
@@ -270,17 +303,46 @@ impl Channel {
         data_count: Option<u32>,
         callback: Option<MonitorCallback>,
     ) {
-        // block until state becomes Created
+        // Monitor must be either in NotRunning or Reconnecting state
+        if self.monitor().state() != MonitorState::NotRunning
+            && self.monitor().state() != MonitorState::Reconnecting
+        {
+            return;
+        }
+
+        // Wait for Channel state becomes Created
         self.wait_state_change(ChannelState::Created).await;
 
         let dbr_type = match dbr_type {
             Some(dbr_type) => dbr_type,
-            None => self.dbr_type_native(),
+            None => {
+                if self.monitor().state() == MonitorState::NotRunning {
+                    self.dbr_type_native()
+                } else {
+                    self.monitor_data_type()
+                }
+            }
         };
-
         let data_count = match data_count {
             Some(data_count) => data_count,
-            None => self.data_count_native(),
+            None => {
+                if self.monitor().state() == MonitorState::NotRunning {
+                    self.data_count_native()
+                } else {
+                    self.monitor_data_count()
+                }
+            }
+        };
+
+        let callback = match callback {
+            Some(callback) => Some(callback),
+            None => {
+                if self.monitor().state() == MonitorState::NotRunning {
+                    None
+                } else {
+                    self.monitor_callback()
+                }
+            }
         };
 
         let sid = self.sid();
@@ -297,9 +359,13 @@ impl Channel {
                     Some(tcp) => {
                         // set monitor's callback
                         self.set_monitor_callback(callback);
+                        // set monitor's state to Starting
                         self.set_monitor_state(MonitorState::Starting);
-                        // send out CA_PROTO_EVENT_ADD
-                        tcp.send_msgs(vec![msg]).await;
+                        // tell server to start the monitor: send out CA_PROTO_EVENT_ADD
+                        match tcp.send_msgs(vec![msg]).await {
+                            Ok(_) => {}
+                            Err(error) => {}
+                        };
                     }
                     None => {}
                 }
@@ -308,24 +374,31 @@ impl Channel {
         }
     }
 
-    pub async fn cancel_monitor(self: &Self) {
-        if self.monitor_state() == MonitorState::NotRunning {
-            // already stopped
+    /**
+     * Reset monitor data, and tell server to cancel the monitor
+     */
+    pub async fn cancel_monitor(self: &Self, new_state: MonitorState) {
+        if self.monitor_state() == MonitorState::NotRunning
+            || self.monitor_state() == MonitorState::Reconnecting
+        {
+            // already stopped or reconnecting
             return;
         }
-        // clear the monitor related stuff
-        self.set_monitor_callback(None);
-        self.set_monitor_state(MonitorState::NotRunning);
 
-        // send CA_PROTO_EVENT_CANCEL
+        // set monitor state
+        if new_state == MonitorState::NotRunning || new_state == MonitorState::Reconnecting {
+            self.monitor().set_state(new_state);
+        } else {
+            // should not be in this state
+            return;
+        }
+
         let dbr_type = self.monitor_data_type();
         let data_count = self.monitor_data_count();
-
         let sid = self.sid();
         let subid = self.cid();
         let dest = self.addr();
         let context = get_context();
-
         match dest {
             Some(dest) => {
                 let msg: CaMsg =
@@ -333,8 +406,11 @@ impl Channel {
                 let tcp: Option<Arc<crate::tcp::tcp::TCP>> = context.tcps().tcp(&dest);
                 match tcp {
                     Some(tcp) => {
-                        // send out CA_PROTO_EVENT_CANCEL
-                        tcp.send_msgs(vec![msg]).await;
+                        // tell server to release resource: send out CA_PROTO_EVENT_CANCEL
+                        match tcp.send_msgs(vec![msg]).await {
+                            Ok(_) => {}
+                            Err(error) => {}
+                        };
                     }
                     None => {}
                 }
@@ -363,6 +439,22 @@ impl Channel {
 
     pub fn reset_search_counter(&self) -> u32 {
         self.search_counter.swap(0, Ordering::Relaxed)
+    }
+
+    pub fn set_search_counter(&self, counter: u32) {
+        self.search_counter.store(counter, Ordering::Relaxed);
+    }
+
+    pub fn reset_sid(self: &Self) -> u32 {
+        self.sid.swap(0, Ordering::Relaxed)
+    }
+
+    pub fn reset_meta(self: &Self) {
+        self.meta().reset();
+    }
+
+    pub fn reset_value(self: &Self) {
+        self.set_value(None);
     }
 
     // --------------- data getter ---------------------
@@ -401,6 +493,20 @@ impl Channel {
 
     pub fn state_change_notifier(self: &Self) -> &Notify {
         &self.state_change_notifier
+    }
+
+    pub fn tcp(self: &Self) -> Option<Arc<TCP>> {
+        let addr = self.addr();
+        match addr {
+            Some(addr) => {
+                let tcp = get_context().tcps().tcp(&addr);
+                match tcp {
+                    Some(tcp) => Some(tcp),
+                    None => None,
+                }
+            }
+            None => None,
+        }
     }
 
     // ------------- event ----------------
