@@ -149,7 +149,7 @@ impl Channel {
         let cid = self.cid();
         let had_monitor = !(self.monitor().state() == MonitorState::NotRunning);
 
-        // Reset all data, clear IO, 
+        // Reset all data, clear IO,
         // since we are destroying the channel, no need to notify the state change
         self.reset(false);
 
@@ -158,7 +158,8 @@ impl Channel {
 
         // Cancel monitor if there is one
         if had_monitor {
-            self.cancel_monitor(MonitorState::NotRunning, sid, cid, addr).await;
+            self.cancel_monitor(MonitorState::NotRunning, sid, cid, addr)
+                .await;
         }
 
         match addr {
@@ -212,13 +213,14 @@ impl Channel {
 
         // cancel monitor if there is a monitor
         if had_monitor {
-            self.cancel_monitor(MonitorState::Reconnecting, sid, subid, addr).await;
+            self.cancel_monitor(MonitorState::Reconnecting, sid, subid, addr)
+                .await;
         }
     }
 
     /**
      * Reset channel's meta data, and clear the IOs.
-     * 
+     *
      * Note: it sets channel's state to NameSearching
      *       it does not reset monitor's data
      */
@@ -228,13 +230,6 @@ impl Channel {
         self.meta().reset();
         self.set_value(None);
         self.set_addr(None);
-        // if monitor_state == MonitorState::NotRunning {
-        //     self.monitor().set_state(monitor_state);
-        // } else if monitor_state == MonitorState::Reconnecting
-        //     && self.monitor_state() != MonitorState::NotRunning
-        // {
-        //     self.monitor().set_state(monitor_state);
-        // }
         get_context().channels().remove_io_by_cid(self.cid());
         self.set_state(ChannelState::NameSearching, notify_state);
     }
@@ -319,9 +314,6 @@ impl Channel {
             return;
         }
 
-        // Wait for Channel state becomes Created
-        self.wait_state_change(ChannelState::Created).await;
-
         let dbr_type = match dbr_type {
             Some(dbr_type) => dbr_type,
             None => {
@@ -353,7 +345,27 @@ impl Channel {
                 }
             }
         };
+        self.set_monitor_state(MonitorState::Starting);
+        self.set_monitor_data_count(data_count);
+        self.set_monitor_data_type(dbr_type);
+        self.set_monitor_callback(callback);
+        if self.state() == ChannelState::Created {
+            self.send_monitor_add().await;
+        }
+    }
 
+    pub async fn send_monitor_add(self: &Self) {
+
+        if self.state() != ChannelState::Created {
+            return;
+        }
+
+        let dbr_type = self.monitor().start_registry().dbr_type;
+        let data_count = self.monitor().start_registry().data_count;
+        let callback = self.monitor().start_registry().callback.clone();
+
+        let dbr_type = self.monitor().data_type();
+        let data_count = self.monitor().data_count();
         let sid = self.sid();
         let subid = self.cid();
         let dest = self.addr();
@@ -366,10 +378,6 @@ impl Channel {
                 let tcp: Option<Arc<crate::tcp::tcp::TCP>> = context.tcps().tcp(&dest);
                 match tcp {
                     Some(tcp) => {
-                        // set monitor's callback
-                        self.set_monitor_callback(callback);
-                        // set monitor's state to Starting
-                        self.set_monitor_state(MonitorState::Starting);
                         // tell server to start the monitor: send out CA_PROTO_EVENT_ADD
                         match tcp.send_msgs(vec![msg]).await {
                             Ok(_) => {}
@@ -386,7 +394,13 @@ impl Channel {
     /**
      * Reset monitor data, and tell server to cancel the monitor
      */
-    pub async fn cancel_monitor(self: &Self, new_state: MonitorState, sid: u32, subid: u32, dest: Option<SocketAddr>) {
+    pub async fn cancel_monitor(
+        self: &Self,
+        new_state: MonitorState,
+        sid: u32,
+        subid: u32,
+        dest: Option<SocketAddr>,
+    ) {
         if self.monitor_state() == MonitorState::NotRunning
             || self.monitor_state() == MonitorState::Reconnecting
         {

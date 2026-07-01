@@ -24,11 +24,18 @@ pub enum MonitorState {
     Reconnecting,
 }
 
+pub struct MonitorStartRegistry {
+    pub dbr_type: Option<DbrType>,
+    pub data_count: Option<u32>,
+    pub callback: Option<MonitorCallback>,
+}
+
 pub struct Monitor {
     pub state: RwLock<MonitorState>,
     pub data_type: RwLock<DbrType>,
     pub data_count: AtomicU32,
     pub callback: RwLock<Option<MonitorCallback>>,
+    pub start_registry: RwLock<MonitorStartRegistry>,
 }
 
 impl Monitor {
@@ -38,7 +45,28 @@ impl Monitor {
             data_type: RwLock::new(DbrType::Double),
             data_count: AtomicU32::new(0),
             callback: RwLock::new(None),
+            start_registry: RwLock::new(MonitorStartRegistry {
+                dbr_type: None,
+                data_count: None,
+                callback: None,
+            }),
         })
+    }
+
+    // --------------- start registry -------------
+
+    pub fn start_registry(self: &Self) ->  RwLockReadGuard<'_, MonitorStartRegistry>{
+        self.start_registry.read().unwrap()
+    }
+
+    pub fn start_registry_mut(self: &Self) ->  RwLockWriteGuard<'_, MonitorStartRegistry>{
+        self.start_registry.write().unwrap()
+    }
+
+    pub fn set_start_registry(self: &Self, dbr_type: Option<DbrType>, data_count: Option<u32>, callback: Option<MonitorCallback>) {
+        self.start_registry_mut().dbr_type = dbr_type;
+        self.start_registry_mut().data_count = data_count;
+        self.start_registry_mut().callback = callback;
     }
 
     // ---------------- getters -------------------

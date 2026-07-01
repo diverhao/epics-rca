@@ -81,7 +81,7 @@ async fn main() {
 
     channel1
         .start_to_monitor(
-            Some(channel1.dbr_type_native_to_gr()),
+            Some(channel1.dbr_type_native_as_gr()),
             None,
             Some(Arc::new(callback1)),
         )
@@ -89,7 +89,7 @@ async fn main() {
     println!("+++++++++++++++++++++++++++++++++++++++++++++++");
     channel5
         .start_to_monitor(
-            Some(channel1.dbr_type_native_to_gr()),
+            Some(channel1.dbr_type_native_as_gr()),
             None,
             Some(Arc::new(callback5)),
         )

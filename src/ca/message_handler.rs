@@ -186,11 +186,11 @@ async fn handle_ca_proto_create_chan(msg: CaMsg) {
             // do it when everything is ready
             channel.set_state(ChannelState::Created, true);
 
-            // if the channel monitor is reconnecting, resume
-            if channel.monitor_state() == MonitorState::Reconnecting {
-                tokio::spawn(async move  {
-                    channel.start_to_monitor(None, None, None).await;
-                });
+            // if the channel monitor is reconnecting or starting
+            if channel.monitor_state() == MonitorState::Starting
+                || channel.monitor_state() == MonitorState::Reconnecting
+            {
+                channel.send_monitor_add().await;
             }
         }
         None => {

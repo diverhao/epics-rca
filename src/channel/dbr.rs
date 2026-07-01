@@ -936,7 +936,7 @@ impl Channel {
     }
 
     // ----------------- dbr type conversion -------
-    pub fn dbr_type_native_to_time(self: &Self) -> DbrType {
+    pub fn dbr_type_native_as_time(self: &Self) -> DbrType {
         match self.dbr_type_native() {
             DbrType::String
             | DbrType::StsString
@@ -980,7 +980,7 @@ impl Channel {
         }
     }
 
-    pub fn dbr_type_native_to_sts(self: &Self) -> DbrType {
+    pub fn dbr_type_native_as_sts(self: &Self) -> DbrType {
         match self.dbr_type_native() {
             DbrType::String
             | DbrType::StsString
@@ -1024,7 +1024,7 @@ impl Channel {
         }
     }
 
-    pub fn dbr_type_native_to_gr(self: &Self) -> DbrType {
+    pub fn dbr_type_native_as_gr(self: &Self) -> DbrType {
         match self.dbr_type_native() {
             DbrType::String
             | DbrType::StsString
@@ -1068,7 +1068,7 @@ impl Channel {
         }
     }
 
-    pub fn dbr_type_native_to_ctrl(self: &Self) -> DbrType {
+    pub fn dbr_type_native_as_ctrl(self: &Self) -> DbrType {
         match self.dbr_type_native() {
             DbrType::String
             | DbrType::StsString
