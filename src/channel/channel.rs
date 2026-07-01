@@ -3,7 +3,7 @@ use crate::ca::message::CaMsg;
 use crate::channel::dbr::{ChannelAccessRights, ChannelSeverity, ChannelState, ChannelStatus};
 use crate::channel::dbr::{DbrType, DbrValue};
 use crate::channel::meta::Meta;
-use crate::channel::monitor::{self, Monitor, MonitorCallback, MonitorState};
+use crate::channel::monitor::{self, Monitor, MonitorState};
 use crate::context::context::get_context;
 use crate::tcp::tcp::TCP;
 use core::num;
@@ -13,7 +13,12 @@ use std::sync::{
     Arc, RwLock, RwLockReadGuard, RwLockWriteGuard,
     atomic::{AtomicU32, Ordering},
 };
+use std::time::Duration;
 use tokio::sync::Notify;
+use tokio::time::timeout;
+
+// channel monitor callback function
+pub type ChannelCallback = Arc<dyn Fn(&Channel) + Send + Sync + 'static>;
 
 pub struct Channel {
     name: String,
@@ -158,8 +163,7 @@ impl Channel {
 
         // Cancel monitor if there is one
         if had_monitor {
-            self.cancel_monitor(MonitorState::NotRunning, sid, cid, addr)
-                .await;
+            self.cancel_monitor(sid, cid, addr).await;
         }
 
         match addr {
@@ -202,7 +206,6 @@ impl Channel {
     pub async fn reconnect(self: &Self) {
         debug!("Reconnecting channel {}", self.name());
 
-        let had_monitor = !(self.monitor().state() == MonitorState::NotRunning);
         let sid = self.sid();
         let subid = self.cid();
         let addr = self.addr();
@@ -211,10 +214,11 @@ impl Channel {
         self.reset(true);
         println!("{:?}", self.state());
 
-        // cancel monitor if there is a monitor
+        // cancel monitor anyway
+        let had_monitor = self.monitor().state() != MonitorState::NotRunning;
+        self.cancel_monitor(sid, subid, addr).await;
         if had_monitor {
-            self.cancel_monitor(MonitorState::Reconnecting, sid, subid, addr)
-                .await;
+            self.set_monitor_state(MonitorState::Starting);
         }
     }
 
@@ -234,209 +238,117 @@ impl Channel {
         self.set_state(ChannelState::NameSearching, notify_state);
     }
 
-    // ------------------ get/put/monitor --------------
+    // ------------------ get/put --------------
 
-    pub async fn get(self: &Self, dbr_type: Option<DbrType>, data_count: Option<u32>) {
-        // block until state becomes Created
-        self.wait_state_change(ChannelState::Created).await;
-
-        let sid = self.sid();
-        let cid = self.cid();
-        let context = get_context();
-        let ioid = context.channels().next_ioid();
-        let dest = self.addr();
-
-        let dbr_type = {
-            match dbr_type {
-                Some(dbr_type) => dbr_type,
-                None => self.dbr_type_native(),
-            }
-        };
-
-        let data_count = {
-            match data_count {
-                Some(data_count) => data_count,
-                None => self.data_count_native(),
-            }
-        };
-
-        match dest {
-            Some(dest) => {
-                let msg = CaMsg::build_read_notify(dbr_type, data_count, sid, ioid, &vec![dest]);
-                let tcp: Option<Arc<crate::tcp::tcp::TCP>> = context.tcps().tcp(&dest);
-                match tcp {
-                    Some(tcp) => {
-                        let (tx, rx) = tokio::sync::oneshot::channel::<CaMsg>();
-                        get_context().channels().add_io(ioid, tx, cid);
-                        // send out CA_PROTO_READ_NOTIFY
-                        match tcp.send_msgs(vec![msg]).await {
-                            Ok(_) => {}
-                            Err(error) => {}
-                        };
-                        let msg = rx.await;
-                        match msg {
-                            Ok(msg) => {
-                                let num_elem = msg.header().data_count;
-                                let dbr_type_num = msg.header().data_type;
-                                let dbr_type = DbrType::from_u16(dbr_type_num);
-                                match dbr_type {
-                                    Some(dbr_type) => {
-                                        self.update_from_payload_buf(
-                                            msg.payload(),
-                                            num_elem,
-                                            dbr_type,
-                                        );
-                                    }
-                                    None => {}
-                                }
-                            }
-                            Err(_) => {}
-                        }
-                    }
-                    None => {}
-                }
-                // "blocks" until get the CA_PROTO_READ_NOTIFY reply
-            }
-            None => {}
-        }
-    }
-
-    pub async fn start_to_monitor(
+    pub async fn get(
         self: &Self,
+        timeout_sec: Option<f64>,
         dbr_type: Option<DbrType>,
         data_count: Option<u32>,
-        callback: Option<MonitorCallback>,
+        callback: Option<ChannelCallback>,
     ) {
-        // Monitor must be either in NotRunning or Reconnecting state
-        if self.monitor().state() != MonitorState::NotRunning
-            && self.monitor().state() != MonitorState::Reconnecting
-        {
-            return;
-        }
-
-        let dbr_type = match dbr_type {
-            Some(dbr_type) => dbr_type,
-            None => {
-                if self.monitor().state() == MonitorState::NotRunning {
-                    self.dbr_type_native()
-                } else {
-                    self.monitor_data_type()
-                }
-            }
-        };
-        let data_count = match data_count {
-            Some(data_count) => data_count,
-            None => {
-                if self.monitor().state() == MonitorState::NotRunning {
-                    self.data_count_native()
-                } else {
-                    self.monitor_data_count()
-                }
-            }
-        };
-
-        let callback = match callback {
-            Some(callback) => Some(callback),
-            None => {
-                if self.monitor().state() == MonitorState::NotRunning {
-                    None
-                } else {
-                    self.monitor_callback()
-                }
-            }
-        };
-        self.set_monitor_state(MonitorState::Starting);
-        self.set_monitor_data_count(data_count);
-        self.set_monitor_data_type(dbr_type);
-        self.set_monitor_callback(callback);
-        if self.state() == ChannelState::Created {
-            self.send_monitor_add().await;
-        }
-    }
-
-    pub async fn send_monitor_add(self: &Self) {
-
-        if self.state() != ChannelState::Created {
-            return;
-        }
-
-        let dbr_type = self.monitor().start_registry().dbr_type;
-        let data_count = self.monitor().start_registry().data_count;
-        let callback = self.monitor().start_registry().callback.clone();
-
-        let dbr_type = self.monitor().data_type();
-        let data_count = self.monitor().data_count();
-        let sid = self.sid();
-        let subid = self.cid();
-        let dest = self.addr();
         let context = get_context();
+        let ioid: u32 = context.channels().next_ioid();
+        let cid = self.cid();
 
-        match dest {
-            Some(dest) => {
-                let msg: CaMsg =
-                    CaMsg::build_event_add(dbr_type, data_count, sid, subid, &vec![dest]);
-                let tcp: Option<Arc<crate::tcp::tcp::TCP>> = context.tcps().tcp(&dest);
-                match tcp {
-                    Some(tcp) => {
-                        // tell server to start the monitor: send out CA_PROTO_EVENT_ADD
-                        match tcp.send_msgs(vec![msg]).await {
-                            Ok(_) => {}
-                            Err(error) => {}
+        let timeout_sec = {
+            match timeout_sec {
+                Some(timeout_sec) => timeout_sec,
+                None => 1_000_000_000.0, // 31 years is long enough for a CA client
+            }
+        };
+
+        let timeout_duration = match Duration::try_from_secs_f64(timeout_sec) {
+            Ok(duration) => duration,
+            Err(_) => return,
+        };
+
+        // wrap the operation inside a timeout
+        let result = timeout(timeout_duration, async move {
+            // wait until state becomes Created
+            self.wait_state_change(ChannelState::Created).await;
+
+            let sid = self.sid();
+
+            let dest = match self.addr() {
+                Some(addr) => addr,
+                None => return Err("No address"),
+            };
+
+            let dbr_type = {
+                match dbr_type {
+                    Some(dbr_type) => dbr_type,
+                    None => self.dbr_type_native(),
+                }
+            };
+
+            let data_count = {
+                match data_count {
+                    Some(data_count) => data_count,
+                    None => self.data_count_native(),
+                }
+            };
+
+            let msg = CaMsg::build_read_notify(dbr_type, data_count, sid, ioid, &vec![dest]);
+            let tcp: Arc<TCP> = match context.tcps().tcp(&dest) {
+                Some(tcp) => tcp,
+                None => return Err("No TCP"),
+            };
+
+            let (tx, rx) = tokio::sync::oneshot::channel::<CaMsg>();
+            get_context().channels().add_io(ioid, tx, cid);
+
+            // send out CA_PROTO_READ_NOTIFY
+            match tcp.send_msgs(vec![msg]).await {
+                Ok(_) => {}
+                Err(error) => {
+                    return Err("Failed to send message");
+                }
+            };
+            let msg = rx.await;
+            match msg {
+                Ok(msg) => {
+                    let num_elem = msg.header().data_count;
+                    let dbr_type_num = msg.header().data_type;
+                    let dbr_type = DbrType::from_u16(dbr_type_num);
+                    match dbr_type {
+                        Some(dbr_type) => {
+                            self.update_from_payload_buf(msg.payload(), num_elem, dbr_type);
+                            return Ok(());
+                        }
+                        None => {
+                            return Err("No dbr type");
+                        }
+                    }
+                }
+                Err(_) => {
+                    return Err("No message");
+                }
+            }
+            // "blocks" until get the CA_PROTO_READ_NOTIFY reply
+        })
+        .await;
+
+        match result {
+            // not timeout
+            Ok(result) => {
+                match result {
+                    // successfully finish, call callback
+                    Ok(_) => {
+                        if let Some(callback) = callback {
+                            callback(self);
                         };
                     }
-                    None => {}
+                    // error in GET process
+                    Err(_) => {}
                 }
             }
-            None => {}
-        }
-    }
-
-    /**
-     * Reset monitor data, and tell server to cancel the monitor
-     */
-    pub async fn cancel_monitor(
-        self: &Self,
-        new_state: MonitorState,
-        sid: u32,
-        subid: u32,
-        dest: Option<SocketAddr>,
-    ) {
-        if self.monitor_state() == MonitorState::NotRunning
-            || self.monitor_state() == MonitorState::Reconnecting
-        {
-            // already stopped or reconnecting
-            return;
+            // timeout
+            Err(_) => {}
         }
 
-        // set monitor's new state: NotRunning (completely stop), or Reconnecting (reconnect)
-        if new_state == MonitorState::NotRunning || new_state == MonitorState::Reconnecting {
-            self.monitor().set_state(new_state);
-        } else {
-            // should not be in this state
-            return;
-        }
-
-        let dbr_type = self.monitor_data_type();
-        let data_count = self.monitor_data_count();
-        let context = get_context();
-        match dest {
-            Some(dest) => {
-                let msg: CaMsg =
-                    CaMsg::build_event_cancel(dbr_type, data_count, sid, subid, &vec![dest]);
-                let tcp: Option<Arc<crate::tcp::tcp::TCP>> = context.tcps().tcp(&dest);
-                match tcp {
-                    Some(tcp) => {
-                        // tell server to release resource: send out CA_PROTO_EVENT_CANCEL
-                        match tcp.send_msgs(vec![msg]).await {
-                            Ok(_) => {}
-                            Err(error) => {}
-                        };
-                    }
-                    None => {}
-                }
-            }
-            None => {}
-        }
+        // in any situation, clear the io
+        get_context().channels().remove_io_by_ioid(ioid);
     }
 
     // ------------- data setter ----------------
@@ -531,6 +443,12 @@ impl Channel {
 
     // ------------- event ----------------
 
+    /**
+     * Wait for the channel state change.
+     *
+     * Note: This method does not have exit mechanism by itself. It is only used in self.get().
+     *       Use it with cautious.
+     */
     async fn wait_state_change(self: &Self, state: ChannelState) {
         loop {
             let notified = self.state_change_notifier().notified();

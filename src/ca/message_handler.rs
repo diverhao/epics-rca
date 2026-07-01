@@ -1,10 +1,10 @@
 use crate::ca::cmd::CaCmd;
 use crate::ca::header::CaHeader;
 use crate::ca::message::{CA_MINOR_VERSION, CaMsg, SearchReplyFlag};
-use crate::channel;
 use crate::channel::dbr::{ChannelAccessRights, ChannelSeverity, ChannelState, ChannelStatus};
 use crate::channel::dbr::{DbrType, DbrValue};
 use crate::channel::monitor::{Monitor, MonitorState};
+use crate::channel::{self, monitor};
 use crate::context::context::get_context;
 use crate::udp::udp::UDP;
 use ::log::error;
@@ -186,10 +186,8 @@ async fn handle_ca_proto_create_chan(msg: CaMsg) {
             // do it when everything is ready
             channel.set_state(ChannelState::Created, true);
 
-            // if the channel monitor is reconnecting or starting
-            if channel.monitor_state() == MonitorState::Starting
-                || channel.monitor_state() == MonitorState::Reconnecting
-            {
+            // if the channel monitor is marked as Starting
+            if channel.monitor_state() == MonitorState::Starting {
                 channel.send_monitor_add().await;
             }
         }
@@ -232,8 +230,13 @@ fn handle_ca_proto_event_add(msg: CaMsg) {
         None => return,
     };
 
+    if channel.state() != ChannelState::Created {
+        debug!("Channel not Created.");
+        return;
+    }
+
+    // must be Starting or Running
     if channel.monitor_state() == MonitorState::NotRunning {
-        // must be Starting or Running
         debug!("Monitor has been stopped");
         return;
     }
