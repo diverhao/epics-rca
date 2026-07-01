@@ -9,6 +9,7 @@ use ::log::error;
 use ::log::info;
 use core::net::SocketAddr;
 use std::sync::{Arc, RwLock, RwLockReadGuard, RwLockWriteGuard};
+use std::usize::MAX;
 use tokio::net::UdpSocket;
 
 pub struct UDP {
@@ -64,14 +65,13 @@ impl UDP {
         let udp_v4 = Arc::clone(&self);
         let udp_v6 = Arc::clone(&self);
         tokio::spawn(async move {
-            let mut buf: Vec<u8> = vec![];
-            let mut buf_pending = [0_u8; MAX_UDP_SEND];
+            let mut buf: Vec<u8> = vec![0_u8; MAX_UDP_SEND];
             loop {
-                match socket_v4.recv_from(&mut buf_pending).await {
+                match socket_v4.recv_from(&mut buf).await {
                     Ok((size, remote_socket)) => {
-                        buf.extend_from_slice(&buf_pending[..size]);
+                        let mut buf: Vec<u8> = buf[..size].to_vec();
                         let msgs = CaMsg::from_buf(&mut buf, Some(remote_socket), vec![]);
-                        handle_udp_msgs(&remote_socket, msgs).await;
+                        handle_udp_msgs(&remote_socket, msgs);
                     }
                     Err(err) => {
                         error!("Error receving UDP, {:?}", err);
@@ -80,14 +80,13 @@ impl UDP {
             }
         });
         tokio::spawn(async move {
-            let mut buf: Vec<u8> = vec![];
-            let mut buf_pending = [0_u8; MAX_UDP_SEND];
+            let mut buf = [0_u8; MAX_UDP_SEND];
             loop {
-                match socket_v6.recv_from(&mut buf_pending).await {
+                match socket_v6.recv_from(&mut buf).await {
                     Ok((size, remote_socket)) => {
-                        buf.extend_from_slice(&buf_pending[..size]);
+                        let mut buf: Vec<u8> = buf[..size].to_vec();
                         let msgs = CaMsg::from_buf(&mut buf, Some(remote_socket), vec![]);
-                        handle_udp_msgs(&remote_socket, msgs).await;
+                        handle_udp_msgs(&remote_socket, msgs);
                     }
                     Err(err) => {
                         error!("Error receving UDP, {:?}", err);

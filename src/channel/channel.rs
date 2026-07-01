@@ -60,13 +60,19 @@ impl Channel {
             return;
         }
 
-        // find TCP
         let context = get_context();
         let tcps = context.tcps();
-        let tcp = tcps.tcp(&addr);
+        let tcp = tcps.create_tcp(addr).await;
         let cid = self.cid();
+
+        // During the creat_tcp().await, the channel may have been Destroyed,
+        // or reconnected (in NameSearching state), ensure we are on the right track
+        if self.state() != ChannelState::NameFound {
+            return;
+        }
+
         match tcp {
-            Some(tcp) => {
+            Ok(tcp) => {
                 self.set_state(ChannelState::TcpConnected, true);
                 // add this channel to TCP
                 tcp.add_cid(cid);
@@ -75,27 +81,8 @@ impl Channel {
                 // send handshake messages
                 self.send_handshake().await;
             }
-            None => {
-                // connect this tcp address
-                let tcps = get_context().tcps();
-                let tcp = tcps.create_tcp(addr).await;
-                self.set_state(ChannelState::TcpConnected, true);
-                // assign this channel to TCP
-                match tcp {
-                    Ok(tcp) => {
-                        Arc::clone(&tcp).start_to_listen().await;
-                        // add this channel to TCP
-                        tcp.add_cid(cid);
-                        // assign to this channel
-                        self.set_addr(Some(addr));
-                        // send handshake messages
-                        self.send_handshake().await;
-                    }
-                    Err(_) => {
-                        // tcp connection failed
-                        self.set_state(ChannelState::NameSearching, true);
-                    }
-                }
+            Err(_) => {
+                self.reconnect().await;
             }
         }
     }
@@ -113,16 +100,25 @@ impl Channel {
                         let version_msg = CaMsg::build_version(&dests);
                         let client_name_msg = match CaMsg::build_client_name(&dests) {
                             Ok(msg) => msg,
-                            Err(_) => return,
+                            Err(_) => {
+                                self.reconnect().await;
+                                return;
+                            }
                         };
                         let host_name_msg = match CaMsg::build_host_name(&dests) {
                             Ok(msg) => msg,
-                            Err(_) => return,
+                            Err(_) => {
+                                self.reconnect().await;
+                                return;
+                            }
                         };
                         let create_chan_msg =
                             match CaMsg::build_create_chan(self.name(), self.cid(), &dests) {
                                 Ok(msg) => msg,
-                                Err(_) => return,
+                                Err(_) => {
+                                    self.reconnect().await;
+                                    return;
+                                }
                             };
 
                         match tcp
@@ -208,7 +204,17 @@ impl Channel {
 
         let sid = self.sid();
         let subid = self.cid();
+        let cid = self.cid();
         let addr = self.addr();
+
+        if let Some(addr) = addr {
+            if let Some(tcp) = get_context().tcps().tcp(&addr) {
+                tcp.remove_cid(cid);
+                if tcp.cids().len() == 0 {
+                    tcp.disconnect(true, true).await;
+                }
+            }
+        }
 
         // Set monitor state, no need to notify the server because in this case the TCP is already broken
         self.reset(true);

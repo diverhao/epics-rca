@@ -405,6 +405,40 @@ impl CaMsg {
         }
     }
 
+    pub fn build_event_off(dest: &Vec<SocketAddr>) -> CaMsg {
+        let header = CaHeader {
+            cmd: CaCmd::CaProtoEventsOff,
+            payload_size: 0,
+            data_type: 0,
+            data_count: 0,
+            param1: 0,
+            param2: 0,
+        };
+        CaMsg {
+            header: header,
+            payload: vec![],
+            src: None,
+            dest: dest.clone(),
+        }
+    }
+
+    pub fn build_event_on(dest: &Vec<SocketAddr>) -> CaMsg {
+        let header = CaHeader {
+            cmd: CaCmd::CaProtoEventsOn,
+            payload_size: 0,
+            data_type: 0,
+            data_count: 0,
+            param1: 0,
+            param2: 0,
+        };
+        CaMsg {
+            header: header,
+            payload: vec![],
+            src: None,
+            dest: dest.clone(),
+        }
+    }
+
     // -------------- getters --------------------
     pub fn header(self: &Self) -> &CaHeader {
         &self.header

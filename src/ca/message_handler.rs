@@ -17,24 +17,24 @@ use std::sync::{Arc, RwLock, RwLockReadGuard, RwLockWriteGuard};
 /**
  * Handle Channel Access messages
  */
-pub async fn handle_udp_msgs(src: &SocketAddr, msgs: Vec<CaMsg>) {
+pub fn handle_udp_msgs(src: &SocketAddr, msgs: Vec<CaMsg>) {
     for msg in msgs {
-        handle_udp_msg(src, msg).await;
+        handle_udp_msg(src, msg);
     }
 }
 
-pub async fn handle_tcp_msgs(src: &SocketAddr, msgs: Vec<CaMsg>) {
+pub fn handle_tcp_msgs(src: &SocketAddr, msgs: Vec<CaMsg>) {
     for msg in msgs {
-        handle_tcp_msg(src, msg).await;
+        handle_tcp_msg(src, msg);
     }
 }
 
-pub async fn handle_udp_msg(src: &SocketAddr, msg: CaMsg) {
+pub fn handle_udp_msg(src: &SocketAddr, msg: CaMsg) {
     let cmd = msg.header().cmd;
     debug!("\nReceived from {src}: {msg}");
     match cmd {
         CaCmd::CaProtoVersion => handle_ca_proto_version(msg),
-        CaCmd::CaProtoSearch => handle_ca_proto_search(msg).await,
+        CaCmd::CaProtoSearch => handle_ca_proto_search(msg),
         CaCmd::CaProtoNotFound => handle_ca_proto_not_found(msg),
         CaCmd::CaProtoRsrvIsUp => handle_ca_proto_rsrv_is_up(msg),
         CaCmd::CaRepeaterConfirm => handle_ca_repeater_confirm(msg),
@@ -43,7 +43,7 @@ pub async fn handle_udp_msg(src: &SocketAddr, msg: CaMsg) {
     }
 }
 
-pub async fn handle_tcp_msg(src: &SocketAddr, msg: CaMsg) {
+pub fn handle_tcp_msg(src: &SocketAddr, msg: CaMsg) {
     let cmd = msg.header().cmd;
     debug!("\nReceived from {src}: {msg}");
     match cmd {
@@ -61,7 +61,7 @@ pub async fn handle_tcp_msg(src: &SocketAddr, msg: CaMsg) {
         CaCmd::CaProtoClearChannel => handle_ca_proto_clear_channel(msg),
         CaCmd::CaProtoReadNotify => handle_ca_proto_read_notify(msg),
         CaCmd::CaProtoReadBuild => handle_ca_proto_read_build(msg),
-        CaCmd::CaProtoCreateChan => handle_ca_proto_create_chan(msg).await,
+        CaCmd::CaProtoCreateChan => handle_ca_proto_create_chan(msg),
         CaCmd::CaProtoWriteNotify => handle_ca_proto_write_notify(msg),
         CaCmd::CaProtoClientName => handle_ca_proto_client_name(msg),
         CaCmd::CaProtoHostName => handle_ca_proto_host_name(msg),
@@ -94,7 +94,7 @@ fn handle_ca_proto_version(_msg: CaMsg) {
     // do nothing
 }
 
-pub async fn handle_ca_proto_search(msg: CaMsg) {
+pub fn handle_ca_proto_search(msg: CaMsg) {
     // find the channel from search id (cid)
     let src = msg.src();
     match src {
@@ -120,7 +120,9 @@ pub async fn handle_ca_proto_search(msg: CaMsg) {
                     channel.reset_search_counter();
 
                     let server_addr = SocketAddr::new(src.ip(), server_port);
-                    channel.connect(server_addr).await;
+                    tokio::spawn(async move {
+                        channel.connect(server_addr).await;
+                    });
                 }
                 None => {
                     // channel not found by cid
@@ -160,7 +162,7 @@ fn handle_ca_proto_access_rights(msg: CaMsg) {
     }
 }
 
-async fn handle_ca_proto_create_chan(msg: CaMsg) {
+fn handle_ca_proto_create_chan(msg: CaMsg) {
     let header = msg.header();
     let Some(dbr_type) = DbrType::from_u16(header.data_type) else {
         return;
@@ -188,8 +190,10 @@ async fn handle_ca_proto_create_chan(msg: CaMsg) {
 
             // if the channel monitor is marked as Starting
             if channel.monitor_state() == MonitorState::Starting {
-                channel.send_monitor_add().await;
-            }
+                tokio::spawn(async move {
+                    channel.send_monitor_add().await;
+                });
+            };
         }
         None => {
             warn!("Cannot find channel with cid {}", cid);
@@ -261,7 +265,24 @@ fn handle_ca_proto_clear_channel(_msg: CaMsg) {
     // do nothing
 }
 
-fn handle_ca_proto_not_found(_msg: CaMsg) {}
+fn handle_ca_proto_create_ch_fail(msg: CaMsg) {
+    let cid = msg.header().param1;
+    if let Some(channel) = get_context().channels().channel_by_cid(cid) {
+        tokio::spawn(async move { channel.reconnect().await });
+    }
+}
+
+fn handle_ca_proto_server_disconn(msg: CaMsg) {
+    handle_ca_proto_create_ch_fail(msg);
+}
+
+fn handle_ca_proto_error(_msg: CaMsg) {
+    // do nothing
+}
+
+// ---------- need to implement ---------
+
+fn handle_ca_proto_write_notify(_msg: CaMsg) {}
 
 fn handle_ca_proto_rsrv_is_up(_msg: CaMsg) {}
 
@@ -269,32 +290,53 @@ fn handle_ca_repeater_confirm(_msg: CaMsg) {}
 
 fn handle_ca_repeater_register(_msg: CaMsg) {}
 
-fn handle_ca_proto_read(_msg: CaMsg) {}
+// ------------- server does not reply, not implemented or deprecated --------------
 
-fn handle_ca_proto_write(_msg: CaMsg) {}
+fn handle_ca_proto_not_found(_msg: CaMsg) {
+    // server replies only when CA_PROTO_SEARCH has DO_REPLY bit
+    // not implemented
+}
 
-fn handle_ca_proto_snapshot(_msg: CaMsg) {}
+fn handle_ca_proto_read(_msg: CaMsg) {
+    // deprecated
+}
 
-fn handle_ca_proto_build(_msg: CaMsg) {}
+fn handle_ca_proto_snapshot(_msg: CaMsg) {
+    // deprecated
+}
 
-fn handle_ca_proto_events_off(_msg: CaMsg) {}
+fn handle_ca_proto_build(_msg: CaMsg) {
+    // deprecated
+}
 
-fn handle_ca_proto_events_on(_msg: CaMsg) {}
+fn handle_ca_proto_read_sync(_msg: CaMsg) {
+    // deprecated
+}
 
-fn handle_ca_proto_read_sync(_msg: CaMsg) {}
+fn handle_ca_proto_read_build(_msg: CaMsg) {
+    // deprecated
+}
 
-fn handle_ca_proto_error(_msg: CaMsg) {}
+fn handle_ca_proto_client_name(_msg: CaMsg) {
+    // server does not reply this message
+}
 
-fn handle_ca_proto_read_build(_msg: CaMsg) {}
+fn handle_ca_proto_host_name(_msg: CaMsg) {
+    // server does not reply this message
+}
 
-fn handle_ca_proto_write_notify(_msg: CaMsg) {}
+fn handle_ca_proto_signal(_msg: CaMsg) {
+    // deprecated
+}
 
-fn handle_ca_proto_client_name(_msg: CaMsg) {}
+fn handle_ca_proto_write(_msg: CaMsg) {
+    // server does not reply
+}
 
-fn handle_ca_proto_host_name(_msg: CaMsg) {}
+fn handle_ca_proto_events_off(_msg: CaMsg) {
+    // server does not reply
+}
 
-fn handle_ca_proto_signal(_msg: CaMsg) {}
-
-fn handle_ca_proto_create_ch_fail(_msg: CaMsg) {}
-
-fn handle_ca_proto_server_disconn(_msg: CaMsg) {}
+fn handle_ca_proto_events_on(_msg: CaMsg) {
+    // server does not reply
+}

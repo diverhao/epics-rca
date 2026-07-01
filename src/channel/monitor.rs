@@ -2,6 +2,7 @@ use crate::channel::channel::{Channel, ChannelCallback};
 use crate::context::context::get_context;
 use core::num;
 use std::net::SocketAddr;
+use std::sync::atomic::AtomicBool;
 use std::sync::{
     Arc, RwLock, RwLockReadGuard, RwLockWriteGuard,
     atomic::{AtomicU32, Ordering},

@@ -12,7 +12,7 @@ use std::sync::Arc;
 use std::sync::RwLock;
 use std::sync::RwLockReadGuard;
 use std::sync::RwLockWriteGuard;
-use std::sync::atomic::{AtomicU32, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU32, Ordering};
 use tokio::sync::oneshot::Sender;
 use tokio::time::{self, Duration};
 
@@ -20,7 +20,8 @@ pub struct Channels {
     by_name: RwLock<HashMap<String, Arc<Channel>>>,
     by_cid: RwLock<HashMap<u32, Arc<Channel>>>,
     next_cid: AtomicU32,
-    next_ioid: AtomicU32,                            // read and write
+    next_ioid: AtomicU32, // read and write
+    searching_ca: AtomicBool,
     ios: RwLock<HashMap<u32, (Sender<CaMsg>, u32)>>, // HashMap<ioid, (Sender<msg>, cid)>
 }
 
@@ -31,6 +32,7 @@ impl Channels {
             by_cid: RwLock::new(HashMap::new()),
             next_cid: AtomicU32::new(1),
             next_ioid: AtomicU32::new(0),
+            searching_ca: AtomicBool::new(false),
             ios: RwLock::new(HashMap::new()),
         }
     }
@@ -158,6 +160,12 @@ impl Channels {
      * Start periodic task to search
      */
     pub fn start_search_ca(self: Arc<Self>) {
+        // in case there is a second search_ca() invoked
+        if self.searching_ca.swap(true, Ordering::AcqRel) {
+            debug!("CA search is already running, skip this tick");
+            return;
+        }
+
         let min_search_period = get_context()
             .env()
             .get_env("EPICS_CA_MIN_SEARCH_PERIOD")
@@ -196,7 +204,10 @@ impl Channels {
             if channel_state != ChannelState::NeverConnected
                 && channel_state != ChannelState::NameSearching
             {
-                debug!("Channel {name} is already found ({:?}), skip name search", channel_state);
+                debug!(
+                    "Channel {name} is already found ({:?}), skip name search",
+                    channel_state
+                );
                 continue;
             }
             let search_counter = channel.search_counter();
@@ -217,6 +228,7 @@ impl Channels {
                         msgs.push(CaMsg::build_version(udp.ca_addr_list()));
                         buf_len = 16;
                     }
+                    buf_len = buf_len + msg.size();
                     msgs.push(msg);
                 }
                 Err(_) => {
@@ -227,6 +239,7 @@ impl Channels {
         if msgs.len() > 1 {
             udp.send_msgs(&msgs).await;
         }
+
     }
 }
 
