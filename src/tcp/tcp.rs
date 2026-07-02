@@ -60,7 +60,8 @@ impl TCP {
     }
 
     /**
-     * Close tcp connection, also update the state and clean up the relationships.
+     * Close tcp connection, update connection state, stop the periodic task, and unregister this
+     * TCP from TCPs.
      */
     pub async fn disconnect(&self, abort_read_task: bool, stop_check_alive_task: bool) {
         // Update connect state
@@ -84,11 +85,6 @@ impl TCP {
         }
 
         {
-            // let mut writer = self.writer.lock().await;
-            // if let Some(mut writer) = writer.take() {
-            //     // move the writer out of Option
-            //     let _ = writer.shutdown().await;
-            // }
             if let Ok(mut writer_guard) = self.writer.try_lock() {
                 if let Some(mut writer) = writer_guard.take() {
                     let _ =
@@ -436,7 +432,6 @@ impl TCPs {
             debug!("TCP {addr} already exists");
             return Ok(tcp);
         } else {
-
             // tcp may take long while to create
             let tcp = match timeout(Duration::from_secs(10), async move {
                 let tcp: Result<TCP, String> = TCP::new(addr).await;
@@ -452,7 +447,7 @@ impl TCPs {
                     return Err("".to_string());
                 }
             };
-            
+
             // check again if TCPs has one such TCP
             // in case another TCP with same addr is created during the above await
             if let Some(tcp) = self.tcp(&addr) {
@@ -470,7 +465,6 @@ impl TCPs {
             tcp_check_alive.start_check_alive().await;
 
             Ok(tcp)
-
         }
     }
 }

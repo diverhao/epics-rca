@@ -48,120 +48,127 @@ impl Channel {
     }
 
     /**
-     * Connect to the server tcp if this channel is not connected.
+     * Connect the channel
      *  - connect tcp if not connected yet
-     *  - correlate Channel and TCP
-     *  - send out CA_PROTO_VERSION, CA_PROTO_CLIENT_NAME, CA_PROTO_HOST_NAME to tcp
+     *  - set up relationship between Channel and TCP
+     *  - send out handshake packets: CA_PROTO_VERSION, CA_PROTO_CLIENT_NAME, CA_PROTO_HOST_NAME
      */
     pub async fn connect(self: &Self, addr: SocketAddr) {
         let state = self.state();
+        // must be in NameFound state
         if state != ChannelState::NameFound {
             error!("Channel must be in NameFound state to connect tcp");
             return;
         }
 
+        let cid = self.cid();
         let context = get_context();
         let tcps = context.tcps();
+
+        // create TCP (if not exist) or get TCP (if already exist)
         let tcp = tcps.create_tcp(addr).await;
-        let cid = self.cid();
+
+        // failed to create TCP: this TCP is automatically disgarded, then reconnect the channel
+        let tcp = match tcp {
+            Ok(tcp) => tcp,
+            Err(_) => {
+                // The TCP is not created, simply reconnect
+                self.reconnect().await;
+                return;
+            }
+        };
 
         // During the creat_tcp().await, the channel may have been Destroyed,
         // or reconnected (in NameSearching state), ensure we are on the right track
         if self.state() != ChannelState::NameFound {
+            if tcp.cids().len() == 0 {
+                tcp.disconnect(true, true).await;
+            }
             return;
         }
 
-        match tcp {
-            Ok(tcp) => {
-                self.set_state(ChannelState::TcpConnected, true);
-                // add this channel to TCP
-                tcp.add_cid(cid);
-                // assign TCP to this channel
-                self.set_addr(Some(addr));
-                // send handshake messages
-                self.send_handshake().await;
-            }
-            Err(_) => {
-                self.reconnect().await;
-            }
-        }
+        self.set_state(ChannelState::TcpConnected, true);
+        // add this channel to TCP
+        tcp.add_cid(cid);
+        // assign TCP to this channel
+        self.set_addr(Some(addr));
+        // send handshake messages
+        self.send_handshake().await;
     }
 
     pub async fn send_handshake(self: &Self) {
-        let dest = self.addr();
+        let dest = match self.addr() {
+            Some(dest) => dest,
+            None => return,
+        };
 
-        match dest {
-            Some(dest) => {
-                let context = get_context();
-                let tcp = context.tcps().tcp(&dest);
-                match tcp {
-                    Some(tcp) => {
-                        let dests = vec![dest];
-                        let version_msg = CaMsg::build_version(&dests);
-                        let client_name_msg = match CaMsg::build_client_name(&dests) {
-                            Ok(msg) => msg,
-                            Err(_) => {
-                                self.reconnect().await;
-                                return;
-                            }
-                        };
-                        let host_name_msg = match CaMsg::build_host_name(&dests) {
-                            Ok(msg) => msg,
-                            Err(_) => {
-                                self.reconnect().await;
-                                return;
-                            }
-                        };
-                        let create_chan_msg =
-                            match CaMsg::build_create_chan(self.name(), self.cid(), &dests) {
-                                Ok(msg) => msg,
-                                Err(_) => {
-                                    self.reconnect().await;
-                                    return;
-                                }
-                            };
+        let context = get_context();
+        let tcp = match context.tcps().tcp(&dest) {
+            Some(tcp) => tcp,
+            None => return,
+        };
 
-                        match tcp
-                            .send_msgs(vec![
-                                version_msg,
-                                client_name_msg,
-                                host_name_msg,
-                                create_chan_msg,
-                            ])
-                            .await
-                        {
-                            Ok(_) => {}
-                            Err(error) => {}
-                        };
-                    }
-                    None => {}
-                }
+        let dests = vec![dest];
+        let version_msg = CaMsg::build_version(&dests);
+        let client_name_msg = CaMsg::build_client_name(&dests);
+        let host_name_msg = CaMsg::build_host_name(&dests);
+        let create_chan_msg = CaMsg::build_create_chan(self.name(), self.cid(), &dests);
+
+        match tcp
+            .send_msgs(vec![
+                version_msg,
+                client_name_msg,
+                host_name_msg,
+                create_chan_msg,
+            ])
+            .await
+        {
+            Ok(_) => {}
+            Err(error) => {
+                // reconnect channel, TCP's lifecycle is handled by its check alive task
+                self.reconnect().await;
             }
-            None => {}
-        }
+        };
     }
 
-    pub async fn destroy(self: &Self) {
+    /**
+     * Destroy or reconnect the channel
+     *
+     * Do not assume the TCP is destroyed or broken
+     *
+     * It does not destroy/disconnect the TCP
+     */
+    async fn destroy_chan(self: &Self, reconnect: bool) {
+        debug!("Destroying the channel");
+
         let context = get_context();
         let channels = context.channels();
 
+        // Get current states for later use
         let addr: Option<SocketAddr> = self.addr();
         let sid = self.sid();
         let cid = self.cid();
         let had_monitor = !(self.monitor().state() == MonitorState::NotRunning);
 
         // Reset all data, clear IO,
-        // since we are destroying the channel, no need to notify the state change
-        self.reset(false);
+        self.reset();
 
-        // Mark state as Destroyed and notify waiters.
-        self.set_state(ChannelState::Destroyed, true);
+        if reconnect {
+            self.set_state(ChannelState::NameSearching, true);
+        } else {
+            self.set_state(ChannelState::Destroyed, true);
+        }
 
         // Cancel monitor if there is one
         if had_monitor {
             self.cancel_monitor(sid, cid, addr).await;
+            if reconnect {
+                // If reconnect, start the monitor
+                self.set_monitor_state(MonitorState::Starting);
+            }
         }
 
+        // send out CA_PROTO_CLEAR_CHANNEL, if TCP still exists in TCPs
         match addr {
             Some(addr) => {
                 let tcp = get_context().tcps().tcp(&addr);
@@ -187,45 +194,36 @@ impl Channel {
         }
 
         // Clear addr.
-        self.set_addr(None);
+        // todo: why? the reset already
+        // self.set_addr(None);
 
         // Remove from Channels.by_name and Channels.by_cid.
-        channels.remove_by_cid_channel(self.cid());
-        channels.remove_by_name_channel(self.name().to_string());
+        if !reconnect {
+            channels.remove_by_cid_channel(self.cid());
+            channels.remove_by_name_channel(self.name().to_string());
+        }
     }
 
     /**
-     * If there is unreconverable error in TCP, the TCP should already have been destroyed
+     * Reconnect the channel
      *
-     * It is similar to destroy, but the channel's registration in Context is kept
+     * Do not assume the TCP is destroyed or broken
+     *
+     * It does not destroy/disconnect the TCP
      */
     pub async fn reconnect(self: &Self) {
-        debug!("Reconnecting channel {}", self.name());
+        self.destroy_chan(true).await;
+    }
 
-        let sid = self.sid();
-        let subid = self.cid();
-        let cid = self.cid();
-        let addr = self.addr();
-
-        if let Some(addr) = addr {
-            if let Some(tcp) = get_context().tcps().tcp(&addr) {
-                tcp.remove_cid(cid);
-                if tcp.cids().len() == 0 {
-                    tcp.disconnect(true, true).await;
-                }
-            }
-        }
-
-        // Set monitor state, no need to notify the server because in this case the TCP is already broken
-        self.reset(true);
-        println!("{:?}", self.state());
-
-        // cancel monitor anyway
-        let had_monitor = self.monitor().state() != MonitorState::NotRunning;
-        self.cancel_monitor(sid, subid, addr).await;
-        if had_monitor {
-            self.set_monitor_state(MonitorState::Starting);
-        }
+    /**
+     * Destroy the channel
+     *
+     * Do not assume the TCP is destroyed or broken
+     *
+     * It does not destroy/disconnect the TCP
+     */
+    pub async fn destroy(self: &Self) {
+        self.destroy_chan(false).await;
     }
 
     /**
@@ -234,14 +232,15 @@ impl Channel {
      * Note: it sets channel's state to NameSearching
      *       it does not reset monitor's data
      */
-    pub fn reset(self: &Self, notify_state: bool) {
+    pub fn reset(self: &Self) {
         self.set_sid(0);
         self.set_search_counter(1);
         self.meta().reset();
+        self.set_addr(None);
         self.set_value(None);
         self.set_addr(None);
         get_context().channels().remove_io_by_cid(self.cid());
-        self.set_state(ChannelState::NameSearching, notify_state);
+        self.set_state(ChannelState::NameSearching, false);
     }
 
     // ------------------ get/put --------------
@@ -264,97 +263,96 @@ impl Channel {
             }
         };
 
-        let timeout_duration = match Duration::try_from_secs_f64(timeout_sec) {
-            Ok(duration) => duration,
-            Err(_) => return,
+        let state = self.state();
+        if state != ChannelState::Created {
+            // append IO
+            get_context()
+                .channels()
+                .add_io(ioid, cid, dbr_type, data_count, callback);
+            return;
+        }
+        self.get_step_2().await;
+    }
+
+    //
+    /**
+     * Invoked after CA_PROTO_READ_NOTIFY message
+     *
+     * Update channel value, call callback, then return the value
+     */
+    pub fn get_step_3(self: &Self, msg: CaMsg) {
+        let ioid = msg.header().param2;
+        let num_elem = msg.header().data_count;
+        let dbr_type = match DbrType::from_u16(msg.header().data_type) {
+            Some(dbr_type) => dbr_type,
+            None => {
+                // remove this IO
+                get_context().channels().remove_io_by_ioid(ioid);
+                return;
+            }
         };
 
-        // wrap the operation inside a timeout
-        let result = timeout(timeout_duration, async move {
-            // wait until state becomes Created
-            self.wait_state_change(ChannelState::Created).await;
+        self.update_value(msg.payload(), num_elem, dbr_type);
 
+        // remove and get IO
+        let io = match get_context().channels().remove_io_by_ioid(ioid) {
+            Some(io) => io,
+            None => return, // no side effect, just return
+        };
+
+        // call callback
+        match io.callback {
+            Some(callback) => {
+                callback(self);
+            }
+            None => {} // no callback
+        };
+        debug!("------------------ we are here ------------------------");
+    }
+
+    // invoked after channel is Created
+    // find all IOs for this channel, each sends CA_PROTO_READ_NOTIFY
+    pub async fn get_step_2(self: &Self) {
+        // get all IOs of this channel
+        let cid = self.cid();
+        let ios = get_context().channels().ios_of_cid(cid);
+
+        for (ioid, io) in ios {
             let sid = self.sid();
 
             let dest = match self.addr() {
                 Some(addr) => addr,
-                None => return Err("No address"),
+                None => return, // let TCP check-alive handle it
             };
 
             let dbr_type = {
-                match dbr_type {
+                match io.dbr_type {
                     Some(dbr_type) => dbr_type,
                     None => self.dbr_type_native(),
                 }
             };
 
             let data_count = {
-                match data_count {
+                match io.data_count {
                     Some(data_count) => data_count,
                     None => self.data_count_native(),
                 }
             };
 
             let msg = CaMsg::build_read_notify(dbr_type, data_count, sid, ioid, &vec![dest]);
-            let tcp: Arc<TCP> = match context.tcps().tcp(&dest) {
+            let tcp: Arc<TCP> = match get_context().tcps().tcp(&dest) {
                 Some(tcp) => tcp,
-                None => return Err("No TCP"),
+                None => return, // no such TCP, let TCP alive check handle it
             };
-
-            let (tx, rx) = tokio::sync::oneshot::channel::<CaMsg>();
-            get_context().channels().add_io(ioid, tx, cid);
 
             // send out CA_PROTO_READ_NOTIFY
             match tcp.send_msgs(vec![msg]).await {
                 Ok(_) => {}
                 Err(error) => {
-                    return Err("Failed to send message");
+                    return; // let alive check handle the TCP issue
                 }
             };
-            let msg = rx.await;
-            match msg {
-                Ok(msg) => {
-                    let num_elem = msg.header().data_count;
-                    let dbr_type_num = msg.header().data_type;
-                    let dbr_type = DbrType::from_u16(dbr_type_num);
-                    match dbr_type {
-                        Some(dbr_type) => {
-                            self.update_from_payload_buf(msg.payload(), num_elem, dbr_type);
-                            return Ok(());
-                        }
-                        None => {
-                            return Err("No dbr type");
-                        }
-                    }
-                }
-                Err(_) => {
-                    return Err("No message");
-                }
-            }
-            // "blocks" until get the CA_PROTO_READ_NOTIFY reply
-        })
-        .await;
-
-        match result {
-            // not timeout
-            Ok(result) => {
-                match result {
-                    // successfully finish, call callback
-                    Ok(_) => {
-                        if let Some(callback) = callback {
-                            callback(self);
-                        };
-                    }
-                    // error in GET process
-                    Err(_) => {}
-                }
-            }
-            // timeout
-            Err(_) => {}
         }
-
-        // in any situation, clear the io
-        get_context().channels().remove_io_by_ioid(ioid);
     }
 
     // ------------- data setter ----------------

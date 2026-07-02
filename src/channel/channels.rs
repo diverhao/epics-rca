@@ -1,5 +1,6 @@
 use crate::ca::message::{CaMsg, MAX_UDP_SEND};
 use crate::channel;
+use crate::channel::channel::ChannelCallback;
 use crate::channel::dbr::{ChannelAccessRights, ChannelSeverity, ChannelState, ChannelStatus};
 use crate::channel::dbr::{DbrType, DbrValue};
 use crate::env::env::EnvType;
@@ -13,8 +14,16 @@ use std::sync::RwLock;
 use std::sync::RwLockReadGuard;
 use std::sync::RwLockWriteGuard;
 use std::sync::atomic::{AtomicBool, AtomicU32, Ordering};
-use tokio::sync::oneshot::Sender;
 use tokio::time::{self, Duration};
+
+#[derive(Clone)]
+pub struct ChannelIo {
+    pub cid: u32,
+    pub callback: Option<ChannelCallback>,
+    // user requested
+    pub dbr_type: Option<DbrType>,
+    pub data_count: Option<u32>,
+}
 
 pub struct Channels {
     by_name: RwLock<HashMap<String, Arc<Channel>>>,
@@ -22,7 +31,7 @@ pub struct Channels {
     next_cid: AtomicU32,
     next_ioid: AtomicU32, // read and write
     searching_ca: AtomicBool,
-    ios: RwLock<HashMap<u32, (Sender<CaMsg>, u32)>>, // HashMap<ioid, (Sender<msg>, cid)>
+    ios: RwLock<HashMap<u32, ChannelIo>>,
 }
 
 impl Channels {
@@ -88,24 +97,51 @@ impl Channels {
         self.ios_mut().clear();
     }
 
-    pub fn remove_io_by_ioid(self: &Self, ioid: u32) -> Option<(Sender<CaMsg>, u32)> {
+    pub fn remove_io_by_ioid(self: &Self, ioid: u32) -> Option<ChannelIo> {
         self.ios_mut().remove(&ioid)
     }
 
     pub fn remove_io_by_cid(self: &Self, cid: u32) {
-        self.ios_mut().retain(|_, (_, io_cid)| *io_cid != cid);
+        self.ios_mut().retain(|_, io| io.cid != cid);
     }
 
-    fn ios(self: &Self) -> RwLockReadGuard<'_, HashMap<u32, (Sender<CaMsg>, u32)>> {
+    fn ios(self: &Self) -> RwLockReadGuard<'_, HashMap<u32, ChannelIo>> {
         self.ios.read().unwrap()
     }
 
-    fn ios_mut(self: &Self) -> RwLockWriteGuard<'_, HashMap<u32, (Sender<CaMsg>, u32)>> {
+    pub fn ios_of_cid(self: &Self, cid: u32) -> Vec<(u32, ChannelIo)> {
+        self.ios()
+            .iter()
+            .filter(|(_, io)| io.cid == cid)
+            .map(|(ioid, io)| (*ioid, io.clone()))
+            .collect()
+    }
+
+    pub fn io(self: &Self, ioid: u32) -> Option<ChannelIo> {
+        self.ios().get(&ioid).cloned()
+    }
+
+    fn ios_mut(self: &Self) -> RwLockWriteGuard<'_, HashMap<u32, ChannelIo>> {
         self.ios.write().unwrap()
     }
 
-    pub fn add_io(self: &Self, ioid: u32, tx: Sender<CaMsg>, cid: u32) {
-        self.ios_mut().insert(ioid, (tx, cid));
+    pub fn add_io(
+        self: &Self,
+        ioid: u32,
+        cid: u32,
+        dbr_type: Option<DbrType>,
+        data_count: Option<u32>,
+        callback: Option<ChannelCallback>,
+    ) {
+        self.ios_mut().insert(
+            ioid,
+            ChannelIo {
+                cid,
+                dbr_type,
+                data_count,
+                callback,
+            },
+        );
     }
 
     pub fn next_ioid(self: &Self) -> u32 {
@@ -219,27 +255,20 @@ impl Channels {
             debug!("Searching {name}");
             let msg = CaMsg::build_name_search(name, cid, udp.ca_addr_list());
 
-            match msg {
-                Ok(msg) => {
-                    channel.set_state(ChannelState::NameSearching, true);
-                    if buf_len + msg.size() as u32 > MAX_UDP_SEND as u32 {
-                        udp.send_msgs(&msgs).await;
-                        msgs.clear();
-                        msgs.push(CaMsg::build_version(udp.ca_addr_list()));
-                        buf_len = 16;
-                    }
-                    buf_len = buf_len + msg.size();
-                    msgs.push(msg);
-                }
-                Err(_) => {
-                    // skip
-                }
+            channel.set_state(ChannelState::NameSearching, true);
+
+            if buf_len + msg.size() as u32 > MAX_UDP_SEND as u32 {
+                udp.send_msgs(&msgs).await;
+                msgs.clear();
+                msgs.push(CaMsg::build_version(udp.ca_addr_list()));
+                buf_len = 16;
             }
+            buf_len = buf_len + msg.size();
+            msgs.push(msg);
         }
         if msgs.len() > 1 {
             udp.send_msgs(&msgs).await;
         }
-
     }
 }
 
@@ -248,7 +277,7 @@ impl fmt::Display for Channels {
         let mut ios: Vec<(u32, u32)> = self
             .ios()
             .iter()
-            .map(|(ioid, (_, cid))| (*ioid, *cid))
+            .map(|(ioid, io)| (*ioid, io.cid))
             .collect();
         ios.sort_by_key(|(ioid, _)| *ioid);
 

@@ -40,11 +40,11 @@ async fn main() {
     // let data_for_callback = Arc::clone(&data);
 
     let channel1 = context.create_channel("val1");
-    let channel5 = context.create_channel("val5");
+    // let channel5 = context.create_channel("val5");
     println!("{}", context.channels());
 
     // channel.get(channel::dbr::DbrType::StsDouble, 1).await;
-    // channel.get(None, None).await;
+    // channel1.get(Some(5.0), None, None, None).await;
 
     let callback1 = move |channel: &Channel| {
         debug!(
@@ -61,40 +61,43 @@ async fn main() {
             // *data_for_callback.write().unwrap() = value[0];
             debug!("{:?}", value);
         }
-    };
-    let callback5 = move |channel: &Channel| {
-        debug!(
-            "{} has a new value: {:?}, {}",
-            channel.name(),
-            channel.value(),
-            channel.meta()
-        );
-        let value = match channel.value().clone().unwrap() {
-            DbrValue::Double(value) => Some(value),
-            _ => None,
-        };
-        if let Some(value) = value {
-            // *data_for_callback.write().unwrap() = value[0];
-            debug!("{:?}", value);
+        if let Some(data) = channel.dbr_data(channel.dbr_type_native_as_time()) {
+            debug!("------------------------------>>>{}", data);
         }
     };
+    // let callback5 = move |channel: &Channel| {
+    //     debug!(
+    //         "{} has a new value: {:?}, {}",
+    //         channel.name(),
+    //         channel.value(),
+    //         channel.meta()
+    //     );
+    //     let value = match channel.value().clone().unwrap() {
+    //         DbrValue::Double(value) => Some(value),
+    //         _ => None,
+    //     };
+    //     if let Some(value) = value {
+    //         // *data_for_callback.write().unwrap() = value[0];
+    //         debug!("{:?}", value);
+    //     }
+    // };
 
     channel1
         .start_to_monitor(
-            Some(channel1.dbr_type_native_as_gr()),
+            Some(channel1.dbr_type_native_as_time()),
             None,
             Some(Arc::new(callback1)),
         )
         .await;
-    println!("+++++++++++++++++++++++++++++++++++++++++++++++");
-    channel5
-        .start_to_monitor(
-            Some(channel1.dbr_type_native_as_gr()),
-            None,
-            Some(Arc::new(callback5)),
-        )
-        .await;
-    sleep(Duration::from_secs(50)).await;
+    // println!("+++++++++++++++++++++++++++++++++++++++++++++++");
+    // channel5
+    //     .start_to_monitor(
+    //         Some(channel1.dbr_type_native_as_gr()),
+    //         None,
+    //         Some(Arc::new(callback5)),
+    //     )
+    //     .await;
+    // sleep(Duration::from_secs(50)).await;
     // channel1.destroy().await;
 
     // debug!(
@@ -110,4 +113,3 @@ async fn main() {
         .await
         .expect("failed to listen for Ctrl-C");
 }
-

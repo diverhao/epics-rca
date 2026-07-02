@@ -95,45 +95,36 @@ fn handle_ca_proto_version(_msg: CaMsg) {
 }
 
 pub fn handle_ca_proto_search(msg: CaMsg) {
-    // find the channel from search id (cid)
-    let src = msg.src();
-    match src {
-        Some(src) => {
-            let search_id = msg.header().param2;
-            let server_port = msg.header().data_type;
-            let context = get_context();
-            let channels = context.channels();
-            // find the channel
-            let channel = channels.channel_by_cid(search_id);
-            match channel {
-                Some(channel) => {
-                    let state = channel.state();
-                    if state != ChannelState::NeverConnected && state != ChannelState::NameSearching
-                    {
-                        error!(
-                            "Channel must be at NeverConnected or NameSearching state for CA_PROTO_SEARCH"
-                        );
-                        return;
-                    }
-                    // update state and search counter
-                    channel.set_state(ChannelState::NameFound, true);
-                    channel.reset_search_counter();
+    // extract info from message
+    let src = match msg.src() {
+        Some(src) => src,
+        None => return,
+    };
+    let search_id = msg.header().param2;
+    let server_port = msg.header().data_type;
+    let context = get_context();
+    let channels = context.channels();
 
-                    let server_addr = SocketAddr::new(src.ip(), server_port);
-                    tokio::spawn(async move {
-                        channel.connect(server_addr).await;
-                    });
-                }
-                None => {
-                    // channel not found by cid
-                    return;
-                }
-            }
-        }
-        None => {
-            return;
-        }
+    // find the channel
+    let channel = match channels.channel_by_cid(search_id) {
+        Some(channel) => channel,
+        None => return, // channel not found
+    };
+
+    let state = channel.state();
+    if state != ChannelState::NeverConnected && state != ChannelState::NameSearching {
+        error!("Channel must be at NeverConnected or NameSearching state for CA_PROTO_SEARCH");
+        return;
     }
+
+    // update state
+    channel.set_state(ChannelState::NameFound, true);
+
+    // connect TCP (if not connected yet), and send handshake packets
+    let server_addr = SocketAddr::new(src.ip(), server_port);
+    tokio::spawn(async move {
+        channel.connect(server_addr).await;
+    });
 }
 
 fn handle_ca_proto_access_rights(msg: CaMsg) {
@@ -148,18 +139,15 @@ fn handle_ca_proto_access_rights(msg: CaMsg) {
     let cid = msg.header().param1;
     let context = get_context();
     let channels = context.channels();
-    let channel = channels.channel_by_cid(cid);
-    match channel {
-        Some(channel) => {
-            let state = channel.state();
-            if state == ChannelState::TcpConnected {
-                channel.set_access_right(access_right);
-            } else {
-                error!("Channel must be at TcpConnected state for CA_PROTO_ACCESS_RIGHTS");
-            }
+    let channel = match channels.channel_by_cid(cid) {
+        Some(channel) => channel,
+        None => {
+            // cannot find channel in Channels registry, may be destroyed
+            // do nothing
+            return;
         }
-        None => {}
-    }
+    };
+    channel.set_access_right(access_right);
 }
 
 fn handle_ca_proto_create_chan(msg: CaMsg) {
@@ -168,60 +156,59 @@ fn handle_ca_proto_create_chan(msg: CaMsg) {
         return;
     };
 
-    // get channel
     let cid = msg.header().param1;
     let sid = msg.header().param2;
     let data_count = msg.header().data_count;
     let context = get_context();
     let channels = context.channels();
-    let channel = channels.channel_by_cid(cid);
-    match channel {
-        Some(channel) => {
-            let state = channel.state();
-            if state != ChannelState::TcpConnected {
-                error!("Channel must be at TcpConnected state for CA_PROTO_CREATE_CHAN");
-                return;
-            }
-            channel.set_sid(sid);
-            channel.set_dbr_type_native(dbr_type);
-            channel.set_data_count_native(data_count);
-            // do it when everything is ready
-            channel.set_state(ChannelState::Created, true);
-
-            // if the channel monitor is marked as Starting
-            if channel.monitor_state() == MonitorState::Starting {
-                tokio::spawn(async move {
-                    channel.send_monitor_add().await;
-                });
-            };
-        }
-        None => {
-            warn!("Cannot find channel with cid {}", cid);
-        }
+    let channel = match channels.channel_by_cid(cid) {
+        Some(channel) => channel,
+        None => return, // cannot find channel in Channels registry, may have been destroyed
+    };
+    let channel_io = Arc::clone(&channel);
+    let state = channel.state();
+    if state != ChannelState::TcpConnected {
+        error!("Channel must be at TcpConnected state for CA_PROTO_CREATE_CHAN");
+        return;
     }
+    channel.set_sid(sid);
+    channel.set_dbr_type_native(dbr_type);
+    channel.set_data_count_native(data_count);
+    // do it when everything is ready
+    channel.set_state(ChannelState::Created, true);
+
+    // send out CA_PROTO_EVENT_ADD if the monitor is started before this message
+    if channel.monitor_state() == MonitorState::Starting {
+        tokio::spawn(async move {
+            channel.send_monitor_add().await;
+        });
+    };
+
+    // notify IO for this channel, i.e. send CA_PROTO_READ_NOTIFY 
+    // and CA_PROTO_WRITE_NOTIFY if there were get() or put() started
+    tokio::spawn(async move {
+        channel_io.get_step_2().await;
+    });
 }
 
 fn handle_ca_proto_read_notify(msg: CaMsg) {
     // tell the get() to proceed
     let ioid = msg.header().param2;
-    let sid = msg.header().param1;
-    match get_context().channels().remove_io_by_ioid(ioid) {
-        Some((tx, cid)) => {
-            let channel = get_context().channels().channel_by_cid(cid);
-            match channel {
-                Some(channel) => {
-                    let _ = tx.send(msg);
-                }
-                None => {}
-            }
-        }
-        None => {}
-    }
+
+    let io = match get_context().channels().io(ioid) {
+        Some(io) => io,
+        None => return,
+    };
+    let cid = io.cid;
+    let channel = match get_context().channels().channel_by_cid(cid) {
+        Some(channel) => channel,
+        None => return,
+    };
+    channel.get_step_3(msg);
 }
 
 fn handle_ca_proto_event_add(msg: CaMsg) {
-    // actually cid
-    let subid: u32 = msg.header().param2;
+    let subid: u32 = msg.header().param2; // actually cid
     let data_count = msg.header().data_count;
     let num_elem = msg.header().data_count;
     let dbr_type_num = msg.header().data_type;
@@ -231,7 +218,7 @@ fn handle_ca_proto_event_add(msg: CaMsg) {
     };
     let channel = match get_context().channels().channel_by_cid(subid) {
         Some(channel) => channel,
-        None => return,
+        None => return, // cannot find channel in Channels registry
     };
 
     if channel.state() != ChannelState::Created {
@@ -246,7 +233,7 @@ fn handle_ca_proto_event_add(msg: CaMsg) {
     }
 
     // update value and meta first
-    channel.update_from_payload_buf(msg.payload(), num_elem, dbr_type);
+    channel.update_value(msg.payload(), num_elem, dbr_type);
 
     // update the monitor state each time
     channel.set_monitor_state(MonitorState::Running);

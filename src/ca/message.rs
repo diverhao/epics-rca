@@ -20,20 +20,21 @@ pub enum SearchReplyFlag {
 }
 
 pub const CA_MINOR_VERSION: u32 = 13;
+const MAX_CA_PAYLOAD_SIZE: usize = (u32::MAX as usize) & !7;
 
-pub fn pad_payload(payload: &mut Vec<u8>) -> Option<u32> {
-    // resize payload
+pub fn pad_payload(payload: &mut Vec<u8>) -> u32 {
     let padding = (8 - payload.len() % 8) % 8;
-    payload.resize(payload.len() + padding, 0);
-
-    // make sure the payload size fits in u32 data
-    let payload_size: u32 = if let Ok(payload_size) = payload.len().try_into() {
-        payload_size
-    } else {
-        error!("Payload size too large");
-        return None;
+    let padded_len = match payload.len().checked_add(padding) {
+        Some(padded_len) if padded_len <= MAX_CA_PAYLOAD_SIZE => padded_len,
+        _ => {
+            error!("Payload size too large, truncate to {MAX_CA_PAYLOAD_SIZE} bytes");
+            payload.truncate(MAX_CA_PAYLOAD_SIZE);
+            MAX_CA_PAYLOAD_SIZE
+        }
     };
-    Some(payload_size)
+
+    payload.resize(padded_len, 0);
+    padded_len as u32
 }
 
 pub fn current_hostname_bytes() -> Vec<u8> {
@@ -166,33 +167,28 @@ impl CaMsg {
 
     // ------------------- builders --------------------
 
-    pub fn build_name_search(name: &str, cid: u32, dest: &Vec<SocketAddr>) -> Result<Self, String> {
+    pub fn build_name_search(name: &str, cid: u32, dest: &Vec<SocketAddr>) -> Self {
         // build padded payload
         let mut payload: Vec<u8> = vec![];
         let name_bytes = name.as_bytes();
         payload.extend_from_slice(name_bytes);
         payload.push(0);
-        let payload_size = pad_payload(&mut payload); // if payload too large, return None
+        let payload_size = pad_payload(&mut payload);
 
-        match payload_size {
-            Some(payload_size) => {
-                // build CA header
-                let header = CaHeader {
-                    cmd: CaCmd::CaProtoSearch,
-                    payload_size: payload_size,
-                    data_type: SearchReplyFlag::DontReply as u16,
-                    data_count: CA_MINOR_VERSION as u32,
-                    param1: cid,
-                    param2: cid,
-                };
-                Ok(CaMsg {
-                    header: header,
-                    payload: payload,
-                    src: None,
-                    dest: dest.clone(),
-                })
-            }
-            None => Err("Payload size too large".to_string()),
+        // build CA header
+        let header = CaHeader {
+            cmd: CaCmd::CaProtoSearch,
+            payload_size,
+            data_type: SearchReplyFlag::DontReply as u16,
+            data_count: CA_MINOR_VERSION as u32,
+            param1: cid,
+            param2: cid,
+        };
+        CaMsg {
+            header,
+            payload,
+            src: None,
+            dest: dest.clone(),
         }
     }
 
@@ -230,7 +226,7 @@ impl CaMsg {
         }
     }
 
-    pub fn build_client_name(dest: &Vec<SocketAddr>) -> Result<Self, String> {
+    pub fn build_client_name(dest: &Vec<SocketAddr>) -> Self {
         let mut payload = std::env::var("USER")
             .or_else(|_| std::env::var("USERNAME"))
             .unwrap_or_default()
@@ -238,80 +234,61 @@ impl CaMsg {
         payload.push(0);
         let payload_size = pad_payload(&mut payload);
 
-        match payload_size {
-            Some(payload_size) => {
-                let header = CaHeader {
-                    cmd: CaCmd::CaProtoClientName,
-                    payload_size,
-                    data_type: 0,
-                    data_count: 0,
-                    param1: 0,
-                    param2: 0,
-                };
-                Ok(CaMsg {
-                    header,
-                    payload,
-                    src: None,
-                    dest: dest.clone(),
-                })
-            }
-            None => Err("".to_string()),
+        let header = CaHeader {
+            cmd: CaCmd::CaProtoClientName,
+            payload_size,
+            data_type: 0,
+            data_count: 0,
+            param1: 0,
+            param2: 0,
+        };
+        CaMsg {
+            header,
+            payload,
+            src: None,
+            dest: dest.clone(),
         }
     }
 
-    pub fn build_host_name(dest: &Vec<SocketAddr>) -> Result<CaMsg, String> {
+    pub fn build_host_name(dest: &Vec<SocketAddr>) -> CaMsg {
         let mut payload = current_hostname_bytes();
         payload.push(0);
         let payload_size = pad_payload(&mut payload);
 
-        match payload_size {
-            Some(payload_size) => {
-                let header = CaHeader {
-                    cmd: CaCmd::CaProtoHostName,
-                    payload_size,
-                    data_type: 0,
-                    data_count: 0,
-                    param1: 0,
-                    param2: 0,
-                };
-                Ok(CaMsg {
-                    header,
-                    payload,
-                    src: None,
-                    dest: dest.clone(),
-                })
-            }
-            None => Err("".to_string()),
+        let header = CaHeader {
+            cmd: CaCmd::CaProtoHostName,
+            payload_size,
+            data_type: 0,
+            data_count: 0,
+            param1: 0,
+            param2: 0,
+        };
+        CaMsg {
+            header,
+            payload,
+            src: None,
+            dest: dest.clone(),
         }
     }
 
-    pub fn build_create_chan(
-        cname: &str,
-        cid: u32,
-        dest: &Vec<SocketAddr>,
-    ) -> Result<CaMsg, String> {
+    pub fn build_create_chan(cname: &str, cid: u32, dest: &Vec<SocketAddr>) -> CaMsg {
         let mut payload = cname.to_string().into_bytes();
         payload.push(0);
         let payload_size = pad_payload(&mut payload);
 
-        match payload_size {
-            Some(payload_size) => {
-                let header = CaHeader {
-                    cmd: CaCmd::CaProtoCreateChan,
-                    payload_size,
-                    data_type: 0,
-                    data_count: 0,
-                    param1: cid,
-                    param2: CA_MINOR_VERSION,
-                };
-                Ok(CaMsg {
-                    header,
-                    payload,
-                    src: None,
-                    dest: dest.clone(),
-                })
-            }
-            None => Err("".to_string()),
+        let header = CaHeader {
+            cmd: CaCmd::CaProtoCreateChan,
+            payload_size,
+            data_type: 0,
+            data_count: 0,
+            param1: cid,
+            param2: CA_MINOR_VERSION,
+        };
+        CaMsg {
+            header,
+            payload,
+            src: None,
+            dest: dest.clone(),
         }
     }
 

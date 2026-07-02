@@ -369,9 +369,9 @@ impl Channel {
 
     pub fn set_state(&self, new_state: ChannelState, notify_state: bool) {
         self.meta().set_state(new_state);
-        if notify_state {
-            self.state_change_notifier().notify_waiters();
-        }
+        // if notify_state {
+        //     self.state_change_notifier().notify_waiters();
+        // }
     }
 
     pub fn set_status(&self, new_status: ChannelStatus) {

@@ -1,4 +1,5 @@
 use crate::channel::channel::Channel;
+use std::sync::Arc;
 
 const DBR_STS_STRING_VALUE_OFFSET: u32 = 4;
 const DBR_STS_SHORT_VALUE_OFFSET: u32 = 4;
@@ -125,14 +126,14 @@ impl ChannelStatus {
 
 #[derive(Clone, Debug)]
 pub enum DbrValue {
-    String(Vec<String>),
+    String(Arc<Vec<String>>),
     // Int,
-    Short(Vec<i16>),
-    Float(Vec<f32>),
-    Enum(Vec<u16>),
-    Char(Vec<u8>),
-    Long(Vec<i32>),
-    Double(Vec<f64>),
+    Short(Arc<Vec<i16>>),
+    Float(Arc<Vec<f32>>),
+    Enum(Arc<Vec<u16>>),
+    Char(Arc<Vec<u8>>),
+    Long(Arc<Vec<i32>>),
+    Double(Arc<Vec<f64>>),
 }
 
 impl DbrValue {
@@ -279,7 +280,7 @@ impl DbrType {
 }
 
 impl Channel {
-    pub fn update_from_payload_buf(&self, buf: &Vec<u8>, num_elem: u32, typ: DbrType) {
+    pub fn update_value(&self, buf: &Vec<u8>, num_elem: u32, typ: DbrType) {
         // update Channel.meta
         match typ {
             DbrType::StsString
@@ -407,7 +408,7 @@ impl Channel {
             strings.push(string);
         }
 
-        Ok(DbrValue::String(strings))
+        Ok(DbrValue::String(Arc::new(strings)))
     }
 
     fn buf_to_short(buf: &Vec<u8>, start: u32, num_elem: u32) -> Result<DbrValue, String> {
@@ -418,7 +419,7 @@ impl Channel {
             shorts.push(i16::from_be_bytes([chunk[0], chunk[1]]));
         }
 
-        Ok(DbrValue::Short(shorts))
+        Ok(DbrValue::Short(Arc::new(shorts)))
     }
 
     fn buf_to_float(buf: &Vec<u8>, start: u32, num_elem: u32) -> Result<DbrValue, String> {
@@ -429,7 +430,7 @@ impl Channel {
             floats.push(f32::from_be_bytes([chunk[0], chunk[1], chunk[2], chunk[3]]));
         }
 
-        Ok(DbrValue::Float(floats))
+        Ok(DbrValue::Float(Arc::new(floats)))
     }
 
     fn buf_to_enum(buf: &Vec<u8>, start: u32, num_elem: u32) -> Result<DbrValue, String> {
@@ -440,13 +441,13 @@ impl Channel {
             enums.push(u16::from_be_bytes([chunk[0], chunk[1]]));
         }
 
-        Ok(DbrValue::Enum(enums))
+        Ok(DbrValue::Enum(Arc::new(enums)))
     }
 
     fn buf_to_char(buf: &Vec<u8>, start: u32, num_elem: u32) -> Result<DbrValue, String> {
         let range = Self::value_range(buf, start, num_elem, 1)?;
 
-        Ok(DbrValue::Char(buf[range].to_vec()))
+        Ok(DbrValue::Char(Arc::new(buf[range].to_vec())))
     }
 
     fn buf_to_long(buf: &Vec<u8>, start: u32, num_elem: u32) -> Result<DbrValue, String> {
@@ -457,7 +458,7 @@ impl Channel {
             longs.push(i32::from_be_bytes([chunk[0], chunk[1], chunk[2], chunk[3]]));
         }
 
-        Ok(DbrValue::Long(longs))
+        Ok(DbrValue::Long(Arc::new(longs)))
     }
 
     fn buf_to_double(buf: &Vec<u8>, start: u32, num_elem: u32) -> Result<DbrValue, String> {
@@ -470,7 +471,7 @@ impl Channel {
             ]));
         }
 
-        Ok(DbrValue::Double(doubles))
+        Ok(DbrValue::Double(Arc::new(doubles)))
     }
 
     // ------------------- meta ----------------

@@ -164,6 +164,7 @@ impl Channel {
         self.set_monitor_state(MonitorState::Starting);
         self.set_monitor_callback(callback);
         if self.state() == ChannelState::Created {
+            debug!(">>>>>>>>>>>>><<<<<<<<<<<<<<<<<<<<<<<<<<<<");
             self.send_monitor_add().await;
         } else {
             // do nothing
@@ -208,33 +209,25 @@ impl Channel {
         let data_count = self.monitor().data_count();
         let sid = self.sid();
         let subid = self.cid();
-        let dest = self.addr();
+        let dest = match self.addr() {
+            Some(dest) => dest,
+            None => return,
+        };
         let context = get_context();
 
-        match dest {
-            Some(dest) => {
-                let msg: CaMsg =
-                    CaMsg::build_event_add(dbr_type, data_count, sid, subid, &vec![dest]);
-                let tcp: Option<Arc<crate::tcp::tcp::TCP>> = context.tcps().tcp(&dest);
-                match tcp {
-                    Some(tcp) => {
-                        // tell server to start the monitor: send out CA_PROTO_EVENT_ADD
-                        match tcp.send_msgs(vec![msg]).await {
-                            Ok(_) => {}
-                            Err(error) => {
-                                // do nothing, this is handled by periodic TCP alive check
-                            }
-                        };
-                    }
-                    None => {
-                        // this should never happen
-                    }
-                }
+        let msg: CaMsg = CaMsg::build_event_add(dbr_type, data_count, sid, subid, &vec![dest]);
+        let tcp = match context.tcps().tcp(&dest) {
+            Some(tcp) => tcp,
+            None => return,
+        };
+
+        // tell server to start the monitor: send out CA_PROTO_EVENT_ADD
+        match tcp.send_msgs(vec![msg]).await {
+            Ok(_) => {}
+            Err(error) => {
+                // do nothing, this is handled by periodic TCP alive check
             }
-            None => {
-                // this should never happen
-            }
-        }
+        };
     }
 
     /**
