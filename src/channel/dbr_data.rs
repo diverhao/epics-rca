@@ -211,45 +211,45 @@ pub enum DbrData {
 impl fmt::Display for DbrData {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            DbrData::String(data) => fmt_plain_data(f, "String", data),
-            DbrData::Short(data) => fmt_plain_data(f, "Short", data),
-            DbrData::Float(data) => fmt_plain_data(f, "Float", data),
-            DbrData::Enum(data) => fmt_plain_data(f, "Enum", data),
-            DbrData::Char(data) => fmt_plain_data(f, "Char", data),
-            DbrData::Long(data) => fmt_plain_data(f, "Long", data),
-            DbrData::Double(data) => fmt_plain_data(f, "Double", data),
-            DbrData::StsString(data) => fmt_sts_data(f, "StsString", data),
-            DbrData::StsShort(data) => fmt_sts_data(f, "StsShort", data),
-            DbrData::StsFloat(data) => fmt_sts_data(f, "StsFloat", data),
-            DbrData::StsEnum(data) => fmt_sts_data(f, "StsEnum", data),
-            DbrData::StsChar(data) => fmt_sts_data(f, "StsChar", data),
-            DbrData::StsLong(data) => fmt_sts_data(f, "StsLong", data),
-            DbrData::StsDouble(data) => fmt_sts_data(f, "StsDouble", data),
-            DbrData::TimeString(data) => fmt_time_data(f, "TimeString", data),
-            DbrData::TimeShort(data) => fmt_time_data(f, "TimeShort", data),
-            DbrData::TimeFloat(data) => fmt_time_data(f, "TimeFloat", data),
-            DbrData::TimeEnum(data) => fmt_time_data(f, "TimeEnum", data),
-            DbrData::TimeChar(data) => fmt_time_data(f, "TimeChar", data),
-            DbrData::TimeLong(data) => fmt_time_data(f, "TimeLong", data),
-            DbrData::TimeDouble(data) => fmt_time_data(f, "TimeDouble", data),
-            DbrData::GrString(data) => fmt_sts_data(f, "GrString", data),
-            DbrData::GrShort(data) => fmt_gr_data(f, "GrShort", data),
-            DbrData::GrFloat(data) => fmt_gr_precision_data(f, "GrFloat", data),
-            DbrData::GrEnum(data) => fmt_gr_enum_data(f, "GrEnum", data),
-            DbrData::GrChar(data) => fmt_gr_data(f, "GrChar", data),
-            DbrData::GrLong(data) => fmt_gr_data(f, "GrLong", data),
-            DbrData::GrDouble(data) => fmt_gr_precision_data(f, "GrDouble", data),
-            DbrData::CtrlString(data) => fmt_sts_data(f, "CtrlString", data),
-            DbrData::CtrlShort(data) => fmt_ctrl_data(f, "CtrlShort", data),
-            DbrData::CtrlFloat(data) => fmt_ctrl_precision_data(f, "CtrlFloat", data),
-            DbrData::CtrlEnum(data) => fmt_ctrl_enum_data(f, "CtrlEnum", data),
-            DbrData::CtrlChar(data) => fmt_ctrl_data(f, "CtrlChar", data),
-            DbrData::CtrlLong(data) => fmt_ctrl_data(f, "CtrlLong", data),
-            DbrData::CtrlDouble(data) => fmt_ctrl_precision_data(f, "CtrlDouble", data),
-            DbrData::PutAckt(data) => fmt_plain_data(f, "PutAckt", data),
-            DbrData::PutAcks(data) => fmt_plain_data(f, "PutAcks", data),
-            DbrData::StsAckString(data) => fmt_sts_ack_string_data(f, "StsAckString", data),
-            DbrData::ClassName(data) => fmt_plain_data(f, "ClassName", data),
+            DbrData::String(data) => fmt_plain_data(f, "DBR_STRING", data),
+            DbrData::Short(data) => fmt_plain_data(f, "DBR_SHORT", data),
+            DbrData::Float(data) => fmt_plain_data(f, "DBR_FLOAT", data),
+            DbrData::Enum(data) => fmt_plain_data(f, "DBR_ENUM", data),
+            DbrData::Char(data) => fmt_plain_data(f, "DBR_CHAR", data),
+            DbrData::Long(data) => fmt_plain_data(f, "DBR_LONG", data),
+            DbrData::Double(data) => fmt_plain_data(f, "DBR_DOUBLE", data),
+            DbrData::StsString(data) => fmt_sts_data(f, "DBR_STS_STRING", data),
+            DbrData::StsShort(data) => fmt_sts_data(f, "DBR_STS_SHORT", data),
+            DbrData::StsFloat(data) => fmt_sts_data(f, "DBR_STS_FLOAT", data),
+            DbrData::StsEnum(data) => fmt_sts_data(f, "DBR_STS_ENUM", data),
+            DbrData::StsChar(data) => fmt_sts_data(f, "DBR_STS_CHAR", data),
+            DbrData::StsLong(data) => fmt_sts_data(f, "DBR_STS_LONG", data),
+            DbrData::StsDouble(data) => fmt_sts_data(f, "DBR_STS_DOUBLE", data),
+            DbrData::TimeString(data) => fmt_time_data(f, "DBR_TIME_STRING", data),
+            DbrData::TimeShort(data) => fmt_time_data(f, "DBR_TIME_SHORT", data),
+            DbrData::TimeFloat(data) => fmt_time_data(f, "DBR_TIME_FLOAT", data),
+            DbrData::TimeEnum(data) => fmt_time_data(f, "DBR_TIME_ENUM", data),
+            DbrData::TimeChar(data) => fmt_time_data(f, "DBR_TIME_CHAR", data),
+            DbrData::TimeLong(data) => fmt_time_data(f, "DBR_TIME_LONG", data),
+            DbrData::TimeDouble(data) => fmt_time_data(f, "DBR_TIME_DOUBLE", data),
+            DbrData::GrString(data) => fmt_sts_data(f, "DBR_GR_STRING", data),
+            DbrData::GrShort(data) => fmt_gr_data(f, "DBR_GR_SHORT", data),
+            DbrData::GrFloat(data) => fmt_gr_precision_data(f, "DBR_GR_FLOAT", data),
+            DbrData::GrEnum(data) => fmt_gr_enum_data(f, "DBR_GR_ENUM", data),
+            DbrData::GrChar(data) => fmt_gr_data(f, "DBR_GR_CHAR", data),
+            DbrData::GrLong(data) => fmt_gr_data(f, "DBR_GR_LONG", data),
+            DbrData::GrDouble(data) => fmt_gr_precision_data(f, "DBR_GR_DOUBLE", data),
+            DbrData::CtrlString(data) => fmt_sts_data(f, "DBR_CTRL_STRING", data),
+            DbrData::CtrlShort(data) => fmt_ctrl_data(f, "DBR_CTRL_SHORT", data),
+            DbrData::CtrlFloat(data) => fmt_ctrl_precision_data(f, "DBR_CTRL_FLOAT", data),
+            DbrData::CtrlEnum(data) => fmt_ctrl_enum_data(f, "DBR_CTRL_ENUM", data),
+            DbrData::CtrlChar(data) => fmt_ctrl_data(f, "DBR_CTRL_CHAR", data),
+            DbrData::CtrlLong(data) => fmt_ctrl_data(f, "DBR_CTRL_LONG", data),
+            DbrData::CtrlDouble(data) => fmt_ctrl_precision_data(f, "DBR_CTRL_DOUBLE", data),
+            DbrData::PutAckt(data) => fmt_plain_data(f, "DBR_PUT_ACKT", data),
+            DbrData::PutAcks(data) => fmt_plain_data(f, "DBR_PUT_ACKS", data),
+            DbrData::StsAckString(data) => fmt_sts_ack_string_data(f, "DBR_STSACK_STRING", data),
+            DbrData::ClassName(data) => fmt_plain_data(f, "DBR_CLASS_NAME", data),
         }
     }
 }
@@ -339,25 +339,150 @@ impl Channel {
 
 const DISPLAY_LIMIT: usize = 100;
 
-fn fmt_array<T: fmt::Debug>(f: &mut fmt::Formatter<'_>, values: &DbrArray<T>) -> fmt::Result {
-    f.write_str("[")?;
+fn fmt_indent(f: &mut fmt::Formatter<'_>, level: usize) -> fmt::Result {
+    for _ in 0..level {
+        f.write_str("  ")?;
+    }
+    Ok(())
+}
+
+fn fmt_begin_object(f: &mut fmt::Formatter<'_>, name: &str) -> fmt::Result {
+    writeln!(f, "{{")?;
+    fmt_field_debug(f, 1, "type", &name, true)
+}
+
+fn fmt_end_object(f: &mut fmt::Formatter<'_>) -> fmt::Result {
+    f.write_str("}")
+}
+
+fn fmt_comma_newline(f: &mut fmt::Formatter<'_>, comma: bool) -> fmt::Result {
+    if comma { writeln!(f, ",") } else { writeln!(f) }
+}
+
+fn fmt_field_debug<T: fmt::Debug>(
+    f: &mut fmt::Formatter<'_>,
+    level: usize,
+    key: &str,
+    value: &T,
+    comma: bool,
+) -> fmt::Result {
+    fmt_indent(f, level)?;
+    write!(f, "\"{key}\": {value:?}")?;
+    fmt_comma_newline(f, comma)
+}
+
+fn fmt_field_display<T: fmt::Display>(
+    f: &mut fmt::Formatter<'_>,
+    level: usize,
+    key: &str,
+    value: T,
+    comma: bool,
+) -> fmt::Result {
+    fmt_indent(f, level)?;
+    write!(f, "\"{key}\": {value}")?;
+    fmt_comma_newline(f, comma)
+}
+
+fn fmt_field_option_i16(
+    f: &mut fmt::Formatter<'_>,
+    level: usize,
+    key: &str,
+    value: Option<i16>,
+    comma: bool,
+) -> fmt::Result {
+    fmt_indent(f, level)?;
+    write!(f, "\"{key}\": ")?;
+    match value {
+        Some(value) => write!(f, "{value}")?,
+        None => f.write_str("null")?,
+    }
+    fmt_comma_newline(f, comma)
+}
+
+fn fmt_array<T: fmt::Debug>(f: &mut fmt::Formatter<'_>, values: &[T], level: usize) -> fmt::Result {
+    if values.is_empty() {
+        return f.write_str("[]");
+    }
+
+    writeln!(f, "[")?;
 
     let shown = values.len().min(DISPLAY_LIMIT);
+    let has_more = values.len() > shown;
     for (i, value) in values.iter().take(DISPLAY_LIMIT).enumerate() {
-        if i > 0 {
-            f.write_str(", ")?;
-        }
+        fmt_indent(f, level + 1)?;
         write!(f, "{value:?}")?;
-    }
-
-    if values.len() > shown {
-        if shown > 0 {
-            f.write_str(", ")?;
+        if i + 1 < shown || has_more {
+            writeln!(f, ",")?;
+        } else {
+            writeln!(f)?;
         }
-        write!(f, "... ({} more)", values.len() - shown)?;
     }
 
+    if has_more {
+        fmt_indent(f, level + 1)?;
+        writeln!(f, "\"... ({} more)\"", values.len() - shown)?;
+    }
+
+    fmt_indent(f, level)?;
     f.write_str("]")
+}
+
+fn fmt_field_array<T: fmt::Debug>(
+    f: &mut fmt::Formatter<'_>,
+    level: usize,
+    key: &str,
+    values: &[T],
+    comma: bool,
+) -> fmt::Result {
+    fmt_indent(f, level)?;
+    write!(f, "\"{key}\": ")?;
+    fmt_array(f, values, level)?;
+    fmt_comma_newline(f, comma)
+}
+
+fn fmt_status_severity(
+    f: &mut fmt::Formatter<'_>,
+    status: ChannelStatus,
+    severity: ChannelSeverity,
+) -> fmt::Result {
+    fmt_field_debug(f, 1, "status", &channel_status_name(status), true)?;
+    fmt_field_debug(f, 1, "severity", &channel_severity_name(severity), true)
+}
+
+fn channel_severity_name(severity: ChannelSeverity) -> &'static str {
+    match severity {
+        ChannelSeverity::NoAlarm => "NO_ALARM",
+        ChannelSeverity::Minor => "MINOR",
+        ChannelSeverity::Major => "MAJOR",
+        ChannelSeverity::Invalid => "INVALID",
+    }
+}
+
+fn channel_status_name(status: ChannelStatus) -> &'static str {
+    match status {
+        ChannelStatus::NoAlarm => "NO_ALARM",
+        ChannelStatus::Read => "READ",
+        ChannelStatus::Write => "WRITE",
+        ChannelStatus::Hihi => "HIHI",
+        ChannelStatus::High => "HIGH",
+        ChannelStatus::Lolo => "LOLO",
+        ChannelStatus::Low => "LOW",
+        ChannelStatus::State => "STATE",
+        ChannelStatus::Cos => "COS",
+        ChannelStatus::Comm => "COMM",
+        ChannelStatus::Timeout => "TIMEOUT",
+        ChannelStatus::HwLimit => "HWLIMIT",
+        ChannelStatus::Calc => "CALC",
+        ChannelStatus::Scan => "SCAN",
+        ChannelStatus::Link => "LINK",
+        ChannelStatus::Soft => "SOFT",
+        ChannelStatus::BadSub => "BAD_SUB",
+        ChannelStatus::Udf => "UDF",
+        ChannelStatus::Disable => "DISABLE",
+        ChannelStatus::Simm => "SIMM",
+        ChannelStatus::ReadAccess => "READ_ACCESS",
+        ChannelStatus::WriteAccess => "WRITE_ACCESS",
+    }
 }
 
 fn fmt_plain_data<T: fmt::Debug>(
@@ -365,9 +490,9 @@ fn fmt_plain_data<T: fmt::Debug>(
     name: &str,
     data: &PlainData<T>,
 ) -> fmt::Result {
-    write!(f, "{name} {{ value: ")?;
-    fmt_array(f, &data.value)?;
-    f.write_str(" }")
+    fmt_begin_object(f, name)?;
+    fmt_field_array(f, 1, "value", data.value.as_slice(), false)?;
+    fmt_end_object(f)
 }
 
 fn fmt_sts_data<T: fmt::Debug>(
@@ -375,13 +500,10 @@ fn fmt_sts_data<T: fmt::Debug>(
     name: &str,
     data: &StsData<T>,
 ) -> fmt::Result {
-    write!(
-        f,
-        "{name} {{ status: {:?}, severity: {:?}, value: ",
-        data.status, data.severity
-    )?;
-    fmt_array(f, &data.value)?;
-    f.write_str(" }")
+    fmt_begin_object(f, name)?;
+    fmt_status_severity(f, data.status, data.severity)?;
+    fmt_field_array(f, 1, "value", data.value.as_slice(), false)?;
+    fmt_end_object(f)
 }
 
 fn fmt_sts_ack_string_data(
@@ -389,13 +511,12 @@ fn fmt_sts_ack_string_data(
     name: &str,
     data: &StsAckStringData,
 ) -> fmt::Result {
-    write!(
-        f,
-        "{name} {{ status: {:?}, severity: {:?}, ackt: {:?}, acks: {:?}, value: ",
-        data.status, data.severity, data.ackt, data.acks
-    )?;
-    fmt_array(f, &data.value)?;
-    f.write_str(" }")
+    fmt_begin_object(f, name)?;
+    fmt_status_severity(f, data.status, data.severity)?;
+    fmt_field_option_i16(f, 1, "ackt", data.ackt.map(|value| value as i16), true)?;
+    fmt_field_option_i16(f, 1, "acks", data.acks.map(|value| value as i16), true)?;
+    fmt_field_array(f, 1, "value", data.value.as_slice(), false)?;
+    fmt_end_object(f)
 }
 
 fn fmt_time_data<T: fmt::Debug>(
@@ -403,13 +524,47 @@ fn fmt_time_data<T: fmt::Debug>(
     name: &str,
     data: &TimeData<T>,
 ) -> fmt::Result {
-    write!(
+    fmt_begin_object(f, name)?;
+    fmt_status_severity(f, data.status, data.severity)?;
+    fmt_field_display(f, 1, "seconds_since_epoch", data.seconds_since_epoch, true)?;
+    fmt_field_display(f, 1, "nano_seconds", data.nano_seconds, true)?;
+    fmt_field_debug(
         f,
-        "{name} {{ status: {:?}, severity: {:?}, seconds_since_epoch: {}, nano_seconds: {}, value: ",
-        data.status, data.severity, data.seconds_since_epoch, data.nano_seconds
+        1,
+        "time_utc",
+        &unix_time_to_utc_string(data.seconds_since_epoch, data.nano_seconds),
+        true,
     )?;
-    fmt_array(f, &data.value)?;
-    f.write_str(" }")
+    fmt_field_array(f, 1, "value", data.value.as_slice(), false)?;
+    fmt_end_object(f)
+}
+
+fn unix_time_to_utc_string(seconds_since_epoch: i32, nano_seconds: u32) -> String {
+    let seconds_since_epoch = seconds_since_epoch as i64;
+    let days = seconds_since_epoch.div_euclid(86_400);
+    let seconds_of_day = seconds_since_epoch.rem_euclid(86_400);
+    let (year, month, day) = civil_from_days(days);
+    let hour = seconds_of_day / 3_600;
+    let minute = seconds_of_day % 3_600 / 60;
+    let second = seconds_of_day % 60;
+
+    format!("{year:04}-{month:02}-{day:02}T{hour:02}:{minute:02}:{second:02}.{nano_seconds:09}Z")
+}
+
+fn civil_from_days(days_since_unix_epoch: i64) -> (i64, u32, u32) {
+    let days = days_since_unix_epoch + 719_468;
+    let era = days.div_euclid(146_097);
+    let day_of_era = days - era * 146_097;
+    let year_of_era =
+        (day_of_era - day_of_era / 1_460 + day_of_era / 36_524 - day_of_era / 146_096) / 365;
+    let year = year_of_era + era * 400;
+    let day_of_year = day_of_era - (365 * year_of_era + year_of_era / 4 - year_of_era / 100);
+    let month_prime = (5 * day_of_year + 2) / 153;
+    let day = day_of_year - (153 * month_prime + 2) / 5 + 1;
+    let month = month_prime + if month_prime < 10 { 3 } else { -9 };
+    let year = year + if month <= 2 { 1 } else { 0 };
+
+    (year, month as u32, day as u32)
 }
 
 fn fmt_gr_data<T: fmt::Debug>(
@@ -417,21 +572,17 @@ fn fmt_gr_data<T: fmt::Debug>(
     name: &str,
     data: &GrData<T>,
 ) -> fmt::Result {
-    write!(
-        f,
-        "{name} {{ status: {:?}, severity: {:?}, units: {:?}, upper_display_limit: {}, lower_display_limit: {}, upper_alarm_limit: {}, upper_warning_limit: {}, lower_warning_limit: {}, lower_alarm_limit: {}, value: ",
-        data.status,
-        data.severity,
-        data.units,
-        data.upper_display_limit,
-        data.lower_display_limit,
-        data.upper_alarm_limit,
-        data.upper_warning_limit,
-        data.lower_warning_limit,
-        data.lower_alarm_limit
-    )?;
-    fmt_array(f, &data.value)?;
-    f.write_str(" }")
+    fmt_begin_object(f, name)?;
+    fmt_status_severity(f, data.status, data.severity)?;
+    fmt_field_debug(f, 1, "units", &data.units, true)?;
+    fmt_field_display(f, 1, "upper_display_limit", data.upper_display_limit, true)?;
+    fmt_field_display(f, 1, "lower_display_limit", data.lower_display_limit, true)?;
+    fmt_field_display(f, 1, "upper_alarm_limit", data.upper_alarm_limit, true)?;
+    fmt_field_display(f, 1, "upper_warning_limit", data.upper_warning_limit, true)?;
+    fmt_field_display(f, 1, "lower_warning_limit", data.lower_warning_limit, true)?;
+    fmt_field_display(f, 1, "lower_alarm_limit", data.lower_alarm_limit, true)?;
+    fmt_field_array(f, 1, "value", data.value.as_slice(), false)?;
+    fmt_end_object(f)
 }
 
 fn fmt_gr_precision_data<T: fmt::Debug>(
@@ -439,33 +590,34 @@ fn fmt_gr_precision_data<T: fmt::Debug>(
     name: &str,
     data: &GrPrecisionData<T>,
 ) -> fmt::Result {
-    write!(
-        f,
-        "{name} {{ status: {:?}, severity: {:?}, precision: {}, padding: {}, units: {:?}, upper_display_limit: {}, lower_display_limit: {}, upper_alarm_limit: {}, upper_warning_limit: {}, lower_warning_limit: {}, lower_alarm_limit: {}, value: ",
-        data.status,
-        data.severity,
-        data.precision,
-        data.padding,
-        data.units,
-        data.upper_display_limit,
-        data.lower_display_limit,
-        data.upper_alarm_limit,
-        data.upper_warning_limit,
-        data.lower_warning_limit,
-        data.lower_alarm_limit
-    )?;
-    fmt_array(f, &data.value)?;
-    f.write_str(" }")
+    fmt_begin_object(f, name)?;
+    fmt_status_severity(f, data.status, data.severity)?;
+    fmt_field_display(f, 1, "precision", data.precision, true)?;
+    fmt_field_display(f, 1, "padding", data.padding, true)?;
+    fmt_field_debug(f, 1, "units", &data.units, true)?;
+    fmt_field_display(f, 1, "upper_display_limit", data.upper_display_limit, true)?;
+    fmt_field_display(f, 1, "lower_display_limit", data.lower_display_limit, true)?;
+    fmt_field_display(f, 1, "upper_alarm_limit", data.upper_alarm_limit, true)?;
+    fmt_field_display(f, 1, "upper_warning_limit", data.upper_warning_limit, true)?;
+    fmt_field_display(f, 1, "lower_warning_limit", data.lower_warning_limit, true)?;
+    fmt_field_display(f, 1, "lower_alarm_limit", data.lower_alarm_limit, true)?;
+    fmt_field_array(f, 1, "value", data.value.as_slice(), false)?;
+    fmt_end_object(f)
 }
 
 fn fmt_gr_enum_data(f: &mut fmt::Formatter<'_>, name: &str, data: &GrEnumData) -> fmt::Result {
-    write!(
+    fmt_begin_object(f, name)?;
+    fmt_status_severity(f, data.status, data.severity)?;
+    fmt_field_display(
         f,
-        "{name} {{ status: {:?}, severity: {:?}, number_of_string_used: {}, strings: {:?}, value: ",
-        data.status, data.severity, data.number_of_string_used, data.strings
+        1,
+        "number_of_string_used",
+        data.number_of_string_used,
+        true,
     )?;
-    fmt_array(f, &data.value)?;
-    f.write_str(" }")
+    fmt_field_array(f, 1, "strings", &data.strings, true)?;
+    fmt_field_array(f, 1, "value", data.value.as_slice(), false)?;
+    fmt_end_object(f)
 }
 
 fn fmt_ctrl_data<T: fmt::Debug>(
@@ -473,23 +625,19 @@ fn fmt_ctrl_data<T: fmt::Debug>(
     name: &str,
     data: &CtrlData<T>,
 ) -> fmt::Result {
-    write!(
-        f,
-        "{name} {{ status: {:?}, severity: {:?}, units: {:?}, upper_display_limit: {}, lower_display_limit: {}, upper_alarm_limit: {}, upper_warning_limit: {}, lower_warning_limit: {}, lower_alarm_limit: {}, upper_control_limit: {:?}, lower_control_limit: {:?}, value: ",
-        data.status,
-        data.severity,
-        data.units,
-        data.upper_display_limit,
-        data.lower_display_limit,
-        data.upper_alarm_limit,
-        data.upper_warning_limit,
-        data.lower_warning_limit,
-        data.lower_alarm_limit,
-        data.upper_control_limit,
-        data.lower_control_limit
-    )?;
-    fmt_array(f, &data.value)?;
-    f.write_str(" }")
+    fmt_begin_object(f, name)?;
+    fmt_status_severity(f, data.status, data.severity)?;
+    fmt_field_debug(f, 1, "units", &data.units, true)?;
+    fmt_field_display(f, 1, "upper_display_limit", data.upper_display_limit, true)?;
+    fmt_field_display(f, 1, "lower_display_limit", data.lower_display_limit, true)?;
+    fmt_field_display(f, 1, "upper_alarm_limit", data.upper_alarm_limit, true)?;
+    fmt_field_display(f, 1, "upper_warning_limit", data.upper_warning_limit, true)?;
+    fmt_field_display(f, 1, "lower_warning_limit", data.lower_warning_limit, true)?;
+    fmt_field_display(f, 1, "lower_alarm_limit", data.lower_alarm_limit, true)?;
+    fmt_field_option_i16(f, 1, "upper_control_limit", data.upper_control_limit, true)?;
+    fmt_field_option_i16(f, 1, "lower_control_limit", data.lower_control_limit, true)?;
+    fmt_field_array(f, 1, "value", data.value.as_slice(), false)?;
+    fmt_end_object(f)
 }
 
 fn fmt_ctrl_precision_data<T: fmt::Debug>(
@@ -497,35 +645,36 @@ fn fmt_ctrl_precision_data<T: fmt::Debug>(
     name: &str,
     data: &CtrlPrecisionData<T>,
 ) -> fmt::Result {
-    write!(
-        f,
-        "{name} {{ status: {:?}, severity: {:?}, precision: {}, padding: {}, units: {:?}, upper_display_limit: {}, lower_display_limit: {}, upper_alarm_limit: {}, upper_warning_limit: {}, lower_warning_limit: {}, lower_alarm_limit: {}, upper_control_limit: {:?}, lower_control_limit: {:?}, value: ",
-        data.status,
-        data.severity,
-        data.precision,
-        data.padding,
-        data.units,
-        data.upper_display_limit,
-        data.lower_display_limit,
-        data.upper_alarm_limit,
-        data.upper_warning_limit,
-        data.lower_warning_limit,
-        data.lower_alarm_limit,
-        data.upper_control_limit,
-        data.lower_control_limit
-    )?;
-    fmt_array(f, &data.value)?;
-    f.write_str(" }")
+    fmt_begin_object(f, name)?;
+    fmt_status_severity(f, data.status, data.severity)?;
+    fmt_field_display(f, 1, "precision", data.precision, true)?;
+    fmt_field_display(f, 1, "padding", data.padding, true)?;
+    fmt_field_debug(f, 1, "units", &data.units, true)?;
+    fmt_field_display(f, 1, "upper_display_limit", data.upper_display_limit, true)?;
+    fmt_field_display(f, 1, "lower_display_limit", data.lower_display_limit, true)?;
+    fmt_field_display(f, 1, "upper_alarm_limit", data.upper_alarm_limit, true)?;
+    fmt_field_display(f, 1, "upper_warning_limit", data.upper_warning_limit, true)?;
+    fmt_field_display(f, 1, "lower_warning_limit", data.lower_warning_limit, true)?;
+    fmt_field_display(f, 1, "lower_alarm_limit", data.lower_alarm_limit, true)?;
+    fmt_field_option_i16(f, 1, "upper_control_limit", data.upper_control_limit, true)?;
+    fmt_field_option_i16(f, 1, "lower_control_limit", data.lower_control_limit, true)?;
+    fmt_field_array(f, 1, "value", data.value.as_slice(), false)?;
+    fmt_end_object(f)
 }
 
 fn fmt_ctrl_enum_data(f: &mut fmt::Formatter<'_>, name: &str, data: &CtrlEnumData) -> fmt::Result {
-    write!(
+    fmt_begin_object(f, name)?;
+    fmt_status_severity(f, data.status, data.severity)?;
+    fmt_field_display(
         f,
-        "{name} {{ status: {:?}, severity: {:?}, number_of_string_used: {}, strings: {:?}, value: ",
-        data.status, data.severity, data.number_of_string_used, data.strings
+        1,
+        "number_of_string_used",
+        data.number_of_string_used,
+        true,
     )?;
-    fmt_array(f, &data.value)?;
-    f.write_str(" }")
+    fmt_field_array(f, 1, "strings", &data.strings, true)?;
+    fmt_field_array(f, 1, "value", data.value.as_slice(), false)?;
+    fmt_end_object(f)
 }
 
 fn sts_data<T>(channel: &Channel, value: DbrArray<T>) -> StsData<T> {

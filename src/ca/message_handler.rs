@@ -184,7 +184,7 @@ fn handle_ca_proto_create_chan(msg: CaMsg) {
         });
     };
 
-    // notify IO for this channel, i.e. send CA_PROTO_READ_NOTIFY 
+    // notify IO for this channel, i.e. send CA_PROTO_READ_NOTIFY
     // and CA_PROTO_WRITE_NOTIFY if there were get() or put() started
     tokio::spawn(async move {
         channel_io.get_step_2().await;
