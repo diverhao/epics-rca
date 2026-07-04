@@ -1,5 +1,4 @@
 use crate::ca::cmd::CaCmd;
-use crate::ca::header::CaHeader;
 use crate::ca::message::{CA_MINOR_VERSION, CaMsg, SearchReplyFlag};
 use crate::channel::dbr::{ChannelAccessRights, ChannelSeverity, ChannelState, ChannelStatus};
 use crate::channel::dbr::{DbrType, DbrValue};
@@ -143,26 +142,6 @@ pub fn handle_ca_proto_search(msg: CaMsg) {
             channel.connect(server_addr).await;
         });
     }
-
-    // if let Some(tcp) = context.tcps().tcp(&server_addr)
-    //     && tcp.is_connected()
-    // {
-    //     // channel.connect_with_existing_tcp(tcp, server_addr);
-    //     channel.set_state(ChannelState::TcpConnected, true);
-    //     // add this channel to TCP
-    //     let cid = channel.cid();
-    //     tcp.add_cid(cid);
-    //     // assign TCP to this channel
-    //     channel.set_addr(Some(server_addr));
-    //     // send handshake messages
-    //     channel.send_handshake();
-    // } else {
-    // tcp is not connected
-    // }
-
-    // tokio::spawn(async move {
-    //     channel.connect(server_addr).await;
-    // });
 }
 
 fn handle_ca_proto_access_rights(msg: CaMsg) {
@@ -266,15 +245,17 @@ fn handle_ca_proto_event_add(msg: CaMsg) {
         return;
     }
 
-    // update value and meta first
+    // update value and meta first, 5%
     channel.update_value(msg.payload(), num_elem, dbr_type);
 
     // update the monitor state each time
-    channel.set_monitor_state(MonitorState::Running);
-    channel.set_monitor_data_count(data_count);
-    channel.set_monitor_data_type(dbr_type);
+    if channel.monitor_state() == MonitorState::Starting {
+        channel.set_monitor_state(MonitorState::Running);
+        channel.set_monitor_data_count(data_count);
+        channel.set_monitor_data_type(dbr_type);
+    }
 
-    // call callback, it is already set
+    // call callback, it is already set, 10%
     channel.call_monitor_callback();
 }
 

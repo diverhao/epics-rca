@@ -19,16 +19,25 @@ use std::{
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::TcpStream;
 use tokio::net::tcp::{OwnedReadHalf, OwnedWriteHalf};
+use tokio::sync::Notify;
 use tokio::sync::{Mutex, MutexGuard};
 use tokio::task::JoinHandle;
 use tokio::time::timeout;
 use tokio::time::{self, Duration};
 
+#[derive(PartialEq, Copy, Clone)]
+pub enum TcpState {
+    NotConnected,
+    Connecting,
+    Connected,
+}
+
 pub struct TCP {
     reader: Arc<Mutex<Option<OwnedReadHalf>>>,
     writer: Arc<Mutex<Option<OwnedWriteHalf>>>,
     read_task: Mutex<Option<JoinHandle<()>>>,
-    connected: RwLock<bool>,
+    state: RwLock<TcpState>,
+    connect_notify: Notify,
     addr: SocketAddr,
     cids: RwLock<HashSet<u32>>,
     check_alive_task: Mutex<Option<JoinHandle<()>>>,
@@ -62,7 +71,7 @@ impl TCP {
     pub async fn disconnect(self: &Self, abort_read_task: bool, stop_check_alive_task: bool) {
         // Update connect state
         // self.set_state(TcpState::NotConnected);
-        self.set_connected(false);
+        self.set_state(TcpState::NotConnected);
 
         // clear send queue
         self.queue_msg_send_mut().clear();
@@ -114,7 +123,6 @@ impl TCP {
             }
         }
     }
-
     pub async fn start_to_listen(self: Arc<Self>) {
         let mut read_task = self.read_task.lock().await;
         if read_task.is_some() {
@@ -159,6 +167,7 @@ impl TCP {
                         packet_count = packet_count + 1;
                         debug!("Received {size} TCP bytes from {}", tcp.addr());
                         buf.extend_from_slice(&buf_pending[..size]);
+
                         let msgs = CaMsg::from_buf(&mut buf, Some(tcp.addr().clone()), vec![]);
                         let src = *tcp.addr();
                         handle_tcp_msgs(&src, msgs);
@@ -205,7 +214,7 @@ impl TCP {
         let mut buf: Vec<u8> = vec![];
         let msgs = {
             let mut queue = self.queue_msg_send_mut();
-            let n = queue.len().min(1024);
+            let n = queue.len().min(4096);
             queue.drain(..n).collect::<Vec<_>>()
         };
 
@@ -355,11 +364,20 @@ impl TCP {
     }
 
     pub fn is_connected(self: &Self) -> bool {
-        self.connected.read().unwrap().clone()
+        // self.connected.read().unwrap().clone()
+        self.state().clone() == TcpState::Connected
     }
 
-    pub fn set_connected(self: &Self, connected: bool) {
-        *self.connected.write().unwrap() = connected;
+    // pub fn set_connected(self: &Self, connected: bool) {
+    //     *self.connected.write().unwrap() = connected;
+    // }
+
+    pub fn state(self: &Self) -> RwLockReadGuard<'_, TcpState> {
+        self.state.read().unwrap()
+    }
+
+    pub fn set_state(self: &Self, new_state: TcpState) {
+        *self.state.write().unwrap() = new_state;
     }
 
     pub async fn set_reader(self: &Self, reader: OwnedReadHalf) {
@@ -416,6 +434,20 @@ impl TCP {
     pub fn add_to_queue_msg_send(self: &Self, msgs: Vec<CaMsg>) {
         self.queue_msg_send_mut().extend(msgs);
     }
+    pub async fn wait_connected(&self) -> Result<(), String> {
+        loop {
+            let notified = self.connect_notify.notified();
+            let state = { *self.state() };
+
+            match state {
+                TcpState::Connected => return Ok(()),
+                TcpState::NotConnected => {
+                    return Err(format!("TCP {} failed to connect", self.addr()));
+                }
+                TcpState::Connecting => notified.await,
+            }
+        }
+    }
 }
 
 pub struct TCPs {
@@ -423,12 +455,14 @@ pub struct TCPs {
     // many TCP clients (< 200), it is OK to iterate over
     // the vector
     tcps: RwLock<Vec<Arc<TCP>>>,
+    connecting_tcps: RwLock<Vec<Arc<TCP>>>,
 }
 
 impl TCPs {
     pub fn new() -> Self {
         TCPs {
             tcps: RwLock::new(vec![]),
+            connecting_tcps: RwLock::new(vec![]),
         }
     }
 
@@ -448,24 +482,29 @@ impl TCPs {
         warn!("Failed to remove {addr} from TCPs: it does not exist ");
     }
 
-    // pub fn remove_tcp_by_id(self: &Self, id: u32) {
-    //     let mut tcps = self.tcps_mut();
-    //     for index in 0..tcps.len() {
-    //         let tcp = &tcps[index];
-    //         if (*tcp).id() == id {
-    //             tcps.remove(index);
-    //             return;
-    //         }
-    //     }
-    //     warn!("Failed to remove {id} from TCPs: it does not exist ");
-    // }
-
     pub fn tcps_mut(self: &Self) -> RwLockWriteGuard<'_, Vec<Arc<TCP>>> {
         self.tcps.write().unwrap()
     }
 
     pub fn tcp(self: &Self, addr: &SocketAddr) -> Option<Arc<TCP>> {
         for tcp in self.tcps().iter() {
+            if tcp.addr() == addr {
+                return Some(Arc::clone(tcp));
+            }
+        }
+        None
+    }
+
+    pub fn connecting_tcps(self: &Self) -> RwLockReadGuard<'_, Vec<Arc<TCP>>> {
+        self.connecting_tcps.read().unwrap()
+    }
+
+    pub fn connecting_tcps_mut(self: &Self) -> RwLockWriteGuard<'_, Vec<Arc<TCP>>> {
+        self.connecting_tcps.write().unwrap()
+    }
+
+    pub fn connecting_tcp(self: &Self, addr: &SocketAddr) -> Option<Arc<TCP>> {
+        for tcp in self.connecting_tcps().iter() {
             if tcp.addr() == addr {
                 return Some(Arc::clone(tcp));
             }
@@ -495,6 +534,12 @@ impl TCPs {
             debug!("TCP {addr} already exists");
             return Ok(tcp);
         } else {
+            if let Some(tcp) = self.connecting_tcp(&addr) {
+                //todo: wait for notifier to notify, the notifier should be in TCP
+                tcp.wait_connected().await?;
+                return Ok(tcp);
+            }
+
             // tcp may take long while to create
             let id = rand::random::<u32>();
             let id1 = id;
@@ -502,7 +547,8 @@ impl TCPs {
                 reader: Arc::new(Mutex::new(None)),
                 writer: Arc::new(Mutex::new(None)),
                 read_task: Mutex::new(None),
-                connected: RwLock::new(false),
+                state: RwLock::new(TcpState::NotConnected),
+                connect_notify: Notify::new(),
                 addr: addr,
                 cids: RwLock::new(HashSet::new()),
                 check_alive_task: Mutex::new(None),
@@ -510,8 +556,9 @@ impl TCPs {
                 paused: AtomicBool::new(false),
                 queue_msg_send: RwLock::new(VecDeque::from([])),
             });
-
-            self.tcps_mut().push(Arc::clone(&tcp));
+            let tcp_1 = Arc::clone(&tcp);
+            tcp.set_state(TcpState::Connecting);
+            self.connecting_tcps_mut().push(Arc::clone(&tcp));
 
             match timeout(Duration::from_secs(10), async move {
                 // let tcp: Result<TCP, String> = TCP::new(addr).await;
@@ -519,39 +566,39 @@ impl TCPs {
                 let port = addr.port();
                 // check if TCPs has one such TCP, if a tcp exists and already connected
                 // just return it, otherwise start to connect this TCP
-                if let Some(another_tcp) = self.tcp(&addr) {
-                    return Ok((another_tcp, false));
-                }
+                // if let Some(another_tcp) = self.tcp(&addr) {
+                //     return Ok((another_tcp, false));
+                // }
 
                 let stream = TcpStream::connect(addr).await;
-                if let Some(another_tcp) = self.tcp(&addr) {
-                    return Ok((another_tcp, false));
-                }
+                // if let Some(another_tcp) = self.tcp(&addr) {
+                //     return Ok((another_tcp, false));
+                // }
 
                 if let Ok(stream) = stream {
                     let (reader, writer) = stream.into_split();
                     tcp.set_reader(reader).await;
                     tcp.set_writer(writer).await;
-                    if let Some(another_tcp) = self.tcp(&addr) {
-                        {
-                            let mut reader = tcp.reader().await;
-                            reader.take();
-                        }
+                    // if let Some(another_tcp) = self.tcp(&addr) {
+                    //     {
+                    //         let mut reader = tcp.reader().await;
+                    //         reader.take();
+                    //     }
 
-                        let writer = {
-                            let mut writer = tcp.writer().await;
-                            writer.take()
-                        };
+                    //     let writer = {
+                    //         let mut writer = tcp.writer().await;
+                    //         writer.take()
+                    //     };
 
-                        if let Some(mut writer) = writer {
-                            let _ =
-                                tokio::time::timeout(Duration::from_millis(100), writer.shutdown())
-                                    .await;
-                        }
-                        return Ok((another_tcp, false));
-                    }
-                    tcp.set_connected(true);
-                    Ok((tcp, true))
+                    //     if let Some(mut writer) = writer {
+                    //         let _ =
+                    //             tokio::time::timeout(Duration::from_millis(100), writer.shutdown())
+                    //                 .await;
+                    //     }
+                    //     return Ok((another_tcp, false));
+                    // }
+                    // tcp.set_connected(true);
+                    Ok(tcp)
                 } else {
                     Err(String::from(
                         "Error: failed to create TCP stream with {ip}:{port}",
@@ -560,23 +607,54 @@ impl TCPs {
             })
             .await
             {
-                Ok(Ok((tcp, is_new))) => {
-                    if is_new {
-                        let tcp_listener = Arc::clone(&tcp);
-                        tcp_listener.start_to_listen().await;
-
-                        let tcp_writer = Arc::clone(&tcp);
-                        tcp_writer.start_to_write();
-
-                        let tcp_check_alive = Arc::clone(&tcp);
-                        tcp_check_alive.start_check_alive().await;
+                Ok(Ok(tcp)) => {
+                    {
+                        let mut connecting = self.connecting_tcps_mut();
+                        if let Some(index) = connecting.iter().position(|t| *t.addr() == addr) {
+                            connecting.remove(index);
+                        }
                     }
+                    self.tcps_mut().push(Arc::clone(&tcp));
+                    tcp.set_state(TcpState::Connected);
+
+                    let tcp_listener = Arc::clone(&tcp);
+                    tcp_listener.start_to_listen().await;
+
+                    let tcp_writer = Arc::clone(&tcp);
+                    tcp_writer.start_to_write();
+
+                    let tcp_check_alive = Arc::clone(&tcp);
+                    tcp_check_alive.start_check_alive().await;
+
+                    // async work is done
+                    // todo: notify waiters to go
+                    tcp.connect_notify.notify_waiters();
                     return Ok(tcp);
                 }
                 Ok(Err(_)) => {
+                    // todo: notify waiters
+                    tcp_1.set_state(TcpState::NotConnected);
+                    {
+                        let mut connecting = self.connecting_tcps_mut();
+                        if let Some(index) = connecting.iter().position(|t| *t.addr() == addr) {
+                            connecting.remove(index);
+                        }
+                    }
+                    tcp_1.connect_notify.notify_waiters();
+
                     return Err("".to_string());
                 }
                 Err(_) => {
+                    // todo: notify waiters
+                    tcp_1.set_state(TcpState::NotConnected);
+                    {
+                        let mut connecting = self.connecting_tcps_mut();
+                        if let Some(index) = connecting.iter().position(|t| *t.addr() == addr) {
+                            connecting.remove(index);
+                        }
+                    }
+                    tcp_1.connect_notify.notify_waiters();
+
                     return Err("".to_string());
                 }
             }

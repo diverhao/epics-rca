@@ -316,55 +316,47 @@ impl Channel {
 
         // update Channel.value
         let value = match typ {
-            DbrType::String => Self::buf_to_string(&buf, 0, num_elem),
-            DbrType::Short => Self::buf_to_short(&buf, 0, num_elem),
-            DbrType::Float => Self::buf_to_float(&buf, 0, num_elem),
-            DbrType::Enum => Self::buf_to_enum(&buf, 0, num_elem),
-            DbrType::Char => Self::buf_to_char(&buf, 0, num_elem),
-            DbrType::Long => Self::buf_to_long(&buf, 0, num_elem),
-            DbrType::Double => Self::buf_to_double(&buf, 0, num_elem),
-            DbrType::StsString => Self::buf_to_string(&buf, DBR_STS_STRING_VALUE_OFFSET, num_elem),
-            DbrType::StsShort => Self::buf_to_short(&buf, DBR_STS_SHORT_VALUE_OFFSET, num_elem),
-            DbrType::StsFloat => Self::buf_to_float(&buf, DBR_STS_FLOAT_VALUE_OFFSET, num_elem),
-            DbrType::StsEnum => Self::buf_to_enum(&buf, DBR_STS_ENUM_VALUE_OFFSET, num_elem),
-            DbrType::StsChar => Self::buf_to_char(&buf, DBR_STS_CHAR_VALUE_OFFSET, num_elem),
-            DbrType::StsLong => Self::buf_to_long(&buf, DBR_STS_LONG_VALUE_OFFSET, num_elem),
-            DbrType::StsDouble => Self::buf_to_double(&buf, DBR_STS_DOUBLE_VALUE_OFFSET, num_elem),
-            DbrType::TimeString => {
-                Self::buf_to_string(&buf, DBR_TIME_STRING_VALUE_OFFSET, num_elem)
-            }
-            DbrType::TimeShort => Self::buf_to_short(&buf, DBR_TIME_SHORT_VALUE_OFFSET, num_elem),
-            DbrType::TimeFloat => Self::buf_to_float(&buf, DBR_TIME_FLOAT_VALUE_OFFSET, num_elem),
-            DbrType::TimeEnum => Self::buf_to_enum(&buf, DBR_TIME_ENUM_VALUE_OFFSET, num_elem),
-            DbrType::TimeChar => Self::buf_to_char(&buf, DBR_TIME_CHAR_VALUE_OFFSET, num_elem),
-            DbrType::TimeLong => Self::buf_to_long(&buf, DBR_TIME_LONG_VALUE_OFFSET, num_elem),
-            DbrType::TimeDouble => {
-                Self::buf_to_double(&buf, DBR_TIME_DOUBLE_VALUE_OFFSET, num_elem)
-            }
-            DbrType::GrString => Self::buf_to_string(&buf, DBR_GR_STRING_VALUE_OFFSET, num_elem),
-            DbrType::GrShort => Self::buf_to_short(&buf, DBR_GR_SHORT_VALUE_OFFSET, num_elem),
-            DbrType::GrFloat => Self::buf_to_float(&buf, DBR_GR_FLOAT_VALUE_OFFSET, num_elem),
-            DbrType::GrEnum => Self::buf_to_enum(&buf, DBR_GR_ENUM_VALUE_OFFSET, num_elem),
-            DbrType::GrChar => Self::buf_to_char(&buf, DBR_GR_CHAR_VALUE_OFFSET, num_elem),
-            DbrType::GrLong => Self::buf_to_long(&buf, DBR_GR_LONG_VALUE_OFFSET, num_elem),
-            DbrType::GrDouble => Self::buf_to_double(&buf, DBR_GR_DOUBLE_VALUE_OFFSET, num_elem),
-            DbrType::CtrlString => {
-                Self::buf_to_string(&buf, DBR_CTRL_STRING_VALUE_OFFSET, num_elem)
-            }
-            DbrType::CtrlShort => Self::buf_to_short(&buf, DBR_CTRL_SHORT_VALUE_OFFSET, num_elem),
-            DbrType::CtrlFloat => Self::buf_to_float(&buf, DBR_CTRL_FLOAT_VALUE_OFFSET, num_elem),
-            DbrType::CtrlEnum => Self::buf_to_enum(&buf, DBR_CTRL_ENUM_VALUE_OFFSET, num_elem),
-            DbrType::CtrlChar => Self::buf_to_char(&buf, DBR_CTRL_CHAR_VALUE_OFFSET, num_elem),
-            DbrType::CtrlLong => Self::buf_to_long(&buf, DBR_CTRL_LONG_VALUE_OFFSET, num_elem),
-            DbrType::CtrlDouble => {
-                Self::buf_to_double(&buf, DBR_CTRL_DOUBLE_VALUE_OFFSET, num_elem)
-            }
-            DbrType::PutAckt => Self::buf_to_enum(&buf, 0, num_elem),
-            DbrType::PutAcks => Self::buf_to_enum(&buf, 0, num_elem),
+            DbrType::String => Self::buf_to_string(buf, 0, num_elem),
+            DbrType::Short => Self::buf_to_short(buf, 0, num_elem),
+            DbrType::Float => Self::buf_to_float(buf, 0, num_elem),
+            DbrType::Enum => Self::buf_to_enum(buf, 0, num_elem),
+            DbrType::Char => Self::buf_to_char(buf, 0, num_elem),
+            DbrType::Long => Self::buf_to_long(buf, 0, num_elem),
+            DbrType::Double => Self::buf_to_double(buf, 0, num_elem),
+            DbrType::StsString => Self::buf_to_string(buf, DBR_STS_STRING_VALUE_OFFSET, num_elem),
+            DbrType::StsShort => Self::buf_to_short(buf, DBR_STS_SHORT_VALUE_OFFSET, num_elem),
+            DbrType::StsFloat => Self::buf_to_float(buf, DBR_STS_FLOAT_VALUE_OFFSET, num_elem),
+            DbrType::StsEnum => Self::buf_to_enum(buf, DBR_STS_ENUM_VALUE_OFFSET, num_elem),
+            DbrType::StsChar => Self::buf_to_char(buf, DBR_STS_CHAR_VALUE_OFFSET, num_elem),
+            DbrType::StsLong => Self::buf_to_long(buf, DBR_STS_LONG_VALUE_OFFSET, num_elem),
+            DbrType::StsDouble => Self::buf_to_double(buf, DBR_STS_DOUBLE_VALUE_OFFSET, num_elem),
+            DbrType::TimeString => Self::buf_to_string(buf, DBR_TIME_STRING_VALUE_OFFSET, num_elem),
+            DbrType::TimeShort => Self::buf_to_short(buf, DBR_TIME_SHORT_VALUE_OFFSET, num_elem),
+            DbrType::TimeFloat => Self::buf_to_float(buf, DBR_TIME_FLOAT_VALUE_OFFSET, num_elem),
+            DbrType::TimeEnum => Self::buf_to_enum(buf, DBR_TIME_ENUM_VALUE_OFFSET, num_elem),
+            DbrType::TimeChar => Self::buf_to_char(buf, DBR_TIME_CHAR_VALUE_OFFSET, num_elem),
+            DbrType::TimeLong => Self::buf_to_long(buf, DBR_TIME_LONG_VALUE_OFFSET, num_elem),
+            DbrType::TimeDouble => Self::buf_to_double(buf, DBR_TIME_DOUBLE_VALUE_OFFSET, num_elem),
+            DbrType::GrString => Self::buf_to_string(buf, DBR_GR_STRING_VALUE_OFFSET, num_elem),
+            DbrType::GrShort => Self::buf_to_short(buf, DBR_GR_SHORT_VALUE_OFFSET, num_elem),
+            DbrType::GrFloat => Self::buf_to_float(buf, DBR_GR_FLOAT_VALUE_OFFSET, num_elem),
+            DbrType::GrEnum => Self::buf_to_enum(buf, DBR_GR_ENUM_VALUE_OFFSET, num_elem),
+            DbrType::GrChar => Self::buf_to_char(buf, DBR_GR_CHAR_VALUE_OFFSET, num_elem),
+            DbrType::GrLong => Self::buf_to_long(buf, DBR_GR_LONG_VALUE_OFFSET, num_elem),
+            DbrType::GrDouble => Self::buf_to_double(buf, DBR_GR_DOUBLE_VALUE_OFFSET, num_elem),
+            DbrType::CtrlString => Self::buf_to_string(buf, DBR_CTRL_STRING_VALUE_OFFSET, num_elem),
+            DbrType::CtrlShort => Self::buf_to_short(buf, DBR_CTRL_SHORT_VALUE_OFFSET, num_elem),
+            DbrType::CtrlFloat => Self::buf_to_float(buf, DBR_CTRL_FLOAT_VALUE_OFFSET, num_elem),
+            DbrType::CtrlEnum => Self::buf_to_enum(buf, DBR_CTRL_ENUM_VALUE_OFFSET, num_elem),
+            DbrType::CtrlChar => Self::buf_to_char(buf, DBR_CTRL_CHAR_VALUE_OFFSET, num_elem),
+            DbrType::CtrlLong => Self::buf_to_long(buf, DBR_CTRL_LONG_VALUE_OFFSET, num_elem),
+            DbrType::CtrlDouble => Self::buf_to_double(buf, DBR_CTRL_DOUBLE_VALUE_OFFSET, num_elem),
+            DbrType::PutAckt => Self::buf_to_enum(buf, 0, num_elem),
+            DbrType::PutAcks => Self::buf_to_enum(buf, 0, num_elem),
             DbrType::StsAckString => {
-                Self::buf_to_string(&buf, DBR_STSACK_STRING_VALUE_OFFSET, num_elem)
+                Self::buf_to_string(buf, DBR_STSACK_STRING_VALUE_OFFSET, num_elem)
             }
-            DbrType::ClassName => Self::buf_to_string(&buf, 0, num_elem),
+            DbrType::ClassName => Self::buf_to_string(buf, 0, num_elem),
         };
 
         if let Ok(value) = value {

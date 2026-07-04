@@ -299,17 +299,17 @@ impl Channels {
             udp.send_msgs(&msgs).await;
         }
 
-        if monitor_running_counter == created_counter {
-            println!("{}", context.tcps().tcps().len());
-            println!(
-                "======================================, {}, {}",
-                monitor_running_counter, created_counter
-            );
-        }
+        // if monitor_running_counter == created_counter {
+        //     println!("{}", context.tcps().tcps().len());
+        //     println!(
+        //         "======================================, {}, {}",
+        //         monitor_running_counter, created_counter
+        //     );
+        // }
 
-        // println!(
-        //     "channel states: never_connected={never_connected_counter}, name_searching={name_searching_counter}, name_found={name_found_counter}, tcp_connected={tcp_connected_counter}, created={created_counter}, destroyed={destroyed_counter}"
-        // );
+        println!(
+            "channel states: never_connected={never_connected_counter}, name_searching={name_searching_counter}, name_found={name_found_counter}, tcp_connected={tcp_connected_counter}, created={created_counter}, destroyed={destroyed_counter}"
+        );
     }
 }
 
