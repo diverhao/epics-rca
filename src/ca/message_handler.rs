@@ -74,6 +74,7 @@ pub fn handle_tcp_msg(src: &SocketAddr, msg: CaMsg) {
 }
 
 fn handle_ca_proto_echo(msg: CaMsg) {
+    println!("echo --------------------------------- received");
     // find the tcp and mark it alive
     let addr = msg.src().as_ref();
     match addr {
@@ -113,7 +114,11 @@ pub fn handle_ca_proto_search(msg: CaMsg) {
 
     let state = channel.state();
     if state != ChannelState::NeverConnected && state != ChannelState::NameSearching {
-        error!("Channel must be at NeverConnected or NameSearching state for CA_PROTO_SEARCH");
+        // duplicated search success message from server
+        debug!(
+            "Channel must be at NeverConnected or NameSearching state for CA_PROTO_SEARCH, but now is {:?}",
+            state
+        );
         return;
     }
 
@@ -122,9 +127,42 @@ pub fn handle_ca_proto_search(msg: CaMsg) {
 
     // connect TCP (if not connected yet), and send handshake packets
     let server_addr = SocketAddr::new(src.ip(), server_port);
-    tokio::spawn(async move {
-        channel.connect(server_addr).await;
-    });
+    if let Some(tcp) = context.tcps().tcp(&server_addr) {
+        // channel.connect_with_existing_tcp(tcp, server_addr);
+        channel.set_state(ChannelState::TcpConnected, true);
+        // add this channel to TCP
+        let cid = channel.cid();
+        tcp.add_cid(cid);
+        // assign TCP to this channel
+        channel.set_addr(Some(server_addr));
+        // send handshake messages
+        channel.send_handshake();
+        return;
+    } else {
+        tokio::spawn(async move {
+            channel.connect(server_addr).await;
+        });
+    }
+
+    // if let Some(tcp) = context.tcps().tcp(&server_addr)
+    //     && tcp.is_connected()
+    // {
+    //     // channel.connect_with_existing_tcp(tcp, server_addr);
+    //     channel.set_state(ChannelState::TcpConnected, true);
+    //     // add this channel to TCP
+    //     let cid = channel.cid();
+    //     tcp.add_cid(cid);
+    //     // assign TCP to this channel
+    //     channel.set_addr(Some(server_addr));
+    //     // send handshake messages
+    //     channel.send_handshake();
+    // } else {
+    // tcp is not connected
+    // }
+
+    // tokio::spawn(async move {
+    //     channel.connect(server_addr).await;
+    // });
 }
 
 fn handle_ca_proto_access_rights(msg: CaMsg) {
@@ -179,16 +217,12 @@ fn handle_ca_proto_create_chan(msg: CaMsg) {
 
     // send out CA_PROTO_EVENT_ADD if the monitor is started before this message
     if channel.monitor_state() == MonitorState::Starting {
-        tokio::spawn(async move {
-            channel.send_monitor_add().await;
-        });
+        channel.send_monitor_add();
     };
 
     // notify IO for this channel, i.e. send CA_PROTO_READ_NOTIFY
     // and CA_PROTO_WRITE_NOTIFY if there were get() or put() started
-    tokio::spawn(async move {
-        channel_io.get_step_2().await;
-    });
+    channel_io.get_step_2();
 }
 
 fn handle_ca_proto_read_notify(msg: CaMsg) {
@@ -255,7 +289,9 @@ fn handle_ca_proto_clear_channel(_msg: CaMsg) {
 fn handle_ca_proto_create_ch_fail(msg: CaMsg) {
     let cid = msg.header().param1;
     if let Some(channel) = get_context().channels().channel_by_cid(cid) {
-        tokio::spawn(async move { channel.reconnect().await });
+        tokio::spawn(async move {
+            channel.reconnect().await;
+        });
     }
 }
 

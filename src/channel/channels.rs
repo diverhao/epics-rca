@@ -3,6 +3,7 @@ use crate::channel;
 use crate::channel::channel::ChannelCallback;
 use crate::channel::dbr::{ChannelAccessRights, ChannelSeverity, ChannelState, ChannelStatus};
 use crate::channel::dbr::{DbrType, DbrValue};
+use crate::channel::monitor::{MonitorDataType, MonitorState};
 use crate::env::env::EnvType;
 use crate::{channel::channel::Channel, context::context::get_context};
 use log::{debug, warn};
@@ -21,7 +22,7 @@ pub struct ChannelIo {
     pub cid: u32,
     pub callback: Option<ChannelCallback>,
     // user requested
-    pub dbr_type: Option<DbrType>,
+    pub dbr_type: Option<MonitorDataType>,
     pub data_count: Option<u32>,
 }
 
@@ -129,7 +130,7 @@ impl Channels {
         self: &Self,
         ioid: u32,
         cid: u32,
-        dbr_type: Option<DbrType>,
+        dbr_type: Option<MonitorDataType>,
         data_count: Option<u32>,
         callback: Option<ChannelCallback>,
     ) {
@@ -233,10 +234,37 @@ impl Channels {
         msgs.push(CaMsg::build_version(udp.ca_addr_list()));
         let mut buf_len: u32 = 16;
 
+        let mut never_connected_counter = 0;
+        let mut name_searching_counter = 0;
+        let mut name_found_counter = 0;
+        let mut tcp_connected_counter = 0;
+        let mut created_counter = 0;
+        let mut destroyed_counter = 0;
+        let mut monitor_not_running_counter = 0;
+        let mut monitor_starting_counter = 0;
+        let mut monitor_running_counter = 0;
+
         for channel in channels {
             let name = channel.name();
             let cid = channel.cid();
             let channel_state = channel.state();
+
+            match channel_state {
+                ChannelState::NeverConnected => never_connected_counter += 1,
+                ChannelState::NameSearching => name_searching_counter += 1,
+                ChannelState::NameFound => name_found_counter += 1,
+                ChannelState::TcpConnected => tcp_connected_counter += 1,
+                ChannelState::Created => created_counter += 1,
+                ChannelState::Destroyed => destroyed_counter += 1,
+            }
+
+            let monitor_state = channel.monitor_state();
+            match monitor_state {
+                MonitorState::NotRunning => monitor_not_running_counter += 1,
+                MonitorState::Starting => monitor_starting_counter += 1,
+                MonitorState::Running => monitor_running_counter += 1,
+            }
+
             if channel_state != ChannelState::NeverConnected
                 && channel_state != ChannelState::NameSearching
             {
@@ -246,6 +274,7 @@ impl Channels {
                 );
                 continue;
             }
+
             let search_counter = channel.search_counter();
             channel.increment_search_counter();
             if !search_counter.is_power_of_two() {
@@ -269,6 +298,18 @@ impl Channels {
         if msgs.len() > 1 {
             udp.send_msgs(&msgs).await;
         }
+
+        if monitor_running_counter == created_counter {
+            println!("{}", context.tcps().tcps().len());
+            println!(
+                "======================================, {}, {}",
+                monitor_running_counter, created_counter
+            );
+        }
+
+        // println!(
+        //     "channel states: never_connected={never_connected_counter}, name_searching={name_searching_counter}, name_found={name_found_counter}, tcp_connected={tcp_connected_counter}, created={created_counter}, destroyed={destroyed_counter}"
+        // );
     }
 }
 

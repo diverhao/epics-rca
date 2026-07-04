@@ -3,7 +3,7 @@ use crate::ca::message::CaMsg;
 use crate::channel::dbr::{ChannelAccessRights, ChannelSeverity, ChannelState, ChannelStatus};
 use crate::channel::dbr::{DbrType, DbrValue};
 use crate::channel::meta::Meta;
-use crate::channel::monitor::{self, Monitor, MonitorState};
+use crate::channel::monitor::{self, Monitor, MonitorDataType, MonitorState};
 use crate::context::context::get_context;
 use crate::tcp::tcp::TCP;
 use core::num;
@@ -53,6 +53,7 @@ impl Channel {
      *  - set up relationship between Channel and TCP
      *  - send out handshake packets: CA_PROTO_VERSION, CA_PROTO_CLIENT_NAME, CA_PROTO_HOST_NAME
      */
+
     pub async fn connect(self: &Self, addr: SocketAddr) {
         let state = self.state();
         // must be in NameFound state
@@ -93,10 +94,10 @@ impl Channel {
         // assign TCP to this channel
         self.set_addr(Some(addr));
         // send handshake messages
-        self.send_handshake().await;
+        self.send_handshake();
     }
 
-    pub async fn send_handshake(self: &Self) {
+    pub fn send_handshake(self: &Self) {
         let dest = match self.addr() {
             Some(dest) => dest,
             None => return,
@@ -114,21 +115,20 @@ impl Channel {
         let host_name_msg = CaMsg::build_host_name(&dests);
         let create_chan_msg = CaMsg::build_create_chan(self.name(), self.cid(), &dests);
 
-        match tcp
-            .send_msgs(vec![
-                version_msg,
-                client_name_msg,
-                host_name_msg,
-                create_chan_msg,
-            ])
-            .await
-        {
-            Ok(_) => {}
-            Err(error) => {
-                // reconnect channel, TCP's lifecycle is handled by its check alive task
-                self.reconnect().await;
-            }
-        };
+        tcp.send_msgs(vec![
+            version_msg,
+            client_name_msg,
+            host_name_msg,
+            create_chan_msg,
+        ]);
+        //     .await
+        // {
+        //     Ok(_) => {}
+        //     Err(error) => {
+        //         // reconnect channel, TCP's lifecycle is handled by its check alive task
+        //         self.reconnect().await;
+        //     }
+        // };
     }
 
     /**
@@ -161,7 +161,7 @@ impl Channel {
 
         // Cancel monitor if there is one
         if had_monitor {
-            self.cancel_monitor(sid, cid, addr).await;
+            self.cancel_monitor(sid, cid, addr);
             if reconnect {
                 // If reconnect, start the monitor
                 self.set_monitor_state(MonitorState::Starting);
@@ -176,10 +176,11 @@ impl Channel {
                     Some(tcp) => {
                         // Tell server to clear channel: Send CA_PROTO_CLEAR_CHANNEL
                         let msg = CaMsg::build_clear_channel(sid, cid, &vec![addr]);
-                        match tcp.send_msgs(vec![msg]).await {
-                            Ok(_) => {}
-                            Err(error) => {}
-                        };
+                        tcp.send_msgs(vec![msg]);
+                        // .await {
+                        //     Ok(_) => {}
+                        //     Err(error) => {}
+                        // };
                         // Remove cid from the associated TCP.
                         tcp.remove_cid(cid);
                         // if TCP has no channel, disconnect it
@@ -245,10 +246,11 @@ impl Channel {
 
     // ------------------ get/put --------------
 
-    pub async fn get(
+    // todo: return a value
+    pub fn get(
         self: &Self,
         timeout_sec: Option<f64>,
-        dbr_type: Option<DbrType>,
+        dbr_type: Option<MonitorDataType>,
         data_count: Option<u32>,
         callback: Option<ChannelCallback>,
     ) {
@@ -271,7 +273,7 @@ impl Channel {
                 .add_io(ioid, cid, dbr_type, data_count, callback);
             return;
         }
-        self.get_step_2().await;
+        self.get_step_2();
     }
 
     //
@@ -312,7 +314,7 @@ impl Channel {
 
     // invoked after channel is Created
     // find all IOs for this channel, each sends CA_PROTO_READ_NOTIFY
-    pub async fn get_step_2(self: &Self) {
+    pub fn get_step_2(self: &Self) {
         // get all IOs of this channel
         let cid = self.cid();
         let ios = get_context().channels().ios_of_cid(cid);
@@ -327,7 +329,7 @@ impl Channel {
 
             let dbr_type = {
                 match io.dbr_type {
-                    Some(dbr_type) => dbr_type,
+                    Some(dbr_type) => dbr_type.resolve(self),
                     None => self.dbr_type_native(),
                 }
             };
@@ -346,12 +348,13 @@ impl Channel {
             };
 
             // send out CA_PROTO_READ_NOTIFY
-            match tcp.send_msgs(vec![msg]).await {
-                Ok(_) => {}
-                Err(error) => {
-                    return; // let alive check handle the TCP issue
-                }
-            };
+            tcp.send_msgs(vec![msg]);
+            // .await {
+            //     Ok(_) => {}
+            //     Err(error) => {
+            //         return; // let alive check handle the TCP issue
+            //     }
+            // };
         }
     }
 

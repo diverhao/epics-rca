@@ -23,8 +23,30 @@ pub enum MonitorState {
     Running,
 }
 
+#[derive(Debug, Copy, Clone)]
+pub enum MonitorDataType {
+    Exact(DbrType),
+    Native,
+    NativeSts,
+    NativeTime,
+    NativeGr,
+    NativeCtrl,
+}
+impl MonitorDataType {
+    pub fn resolve(self, channel: &Channel) -> DbrType {
+        match self {
+            MonitorDataType::Exact(dbr_type) => dbr_type,
+            MonitorDataType::Native => channel.dbr_type_native(),
+            MonitorDataType::NativeSts => channel.dbr_type_native_as_sts(),
+            MonitorDataType::NativeTime => channel.dbr_type_native_as_time(),
+            MonitorDataType::NativeGr => channel.dbr_type_native_as_gr(),
+            MonitorDataType::NativeCtrl => channel.dbr_type_native_as_ctrl(),
+        }
+    }
+}
+
 pub struct MonitorConfig {
-    pub data_type: Option<DbrType>,
+    pub data_type: Option<MonitorDataType>,
     pub data_count: Option<u32>,
 }
 
@@ -92,7 +114,7 @@ impl Monitor {
         self.user_config.read().unwrap().data_count
     }
 
-    pub fn user_config_data_type(self: &Self) -> Option<DbrType> {
+    pub fn user_config_data_type(self: &Self) -> Option<MonitorDataType> {
         self.user_config.read().unwrap().data_type
     }
 
@@ -100,7 +122,7 @@ impl Monitor {
         self.user_config.write().unwrap().data_count = data_count;
     }
 
-    pub fn set_user_config_data_type(self: &Self, data_type: Option<DbrType>) {
+    pub fn set_user_config_data_type(self: &Self, data_type: Option<MonitorDataType>) {
         self.user_config.write().unwrap().data_type = data_type;
     }
 }
@@ -141,9 +163,9 @@ impl Channel {
      * at the time the subscription request is sent. If a monitor is already
      * starting or running, this call leaves the existing monitor unchanged.
      */
-    pub async fn start_to_monitor(
+    pub fn start_to_monitor(
         self: &Self,
-        data_type: Option<DbrType>,
+        data_type: Option<MonitorDataType>,
         data_count: Option<u32>,
         callback: Option<ChannelCallback>,
     ) {
@@ -164,8 +186,7 @@ impl Channel {
         self.set_monitor_state(MonitorState::Starting);
         self.set_monitor_callback(callback);
         if self.state() == ChannelState::Created {
-            debug!(">>>>>>>>>>>>><<<<<<<<<<<<<<<<<<<<<<<<<<<<");
-            self.send_monitor_add().await;
+            self.send_monitor_add();
         } else {
             // do nothing
         }
@@ -184,7 +205,7 @@ impl Channel {
      * resolved; omitted values fall back to the channel's native DBR type and
      * native element count.
      */
-    pub async fn send_monitor_add(self: &Self) {
+    pub fn send_monitor_add(self: &Self) {
         if self.state() != ChannelState::Created {
             return;
         }
@@ -200,7 +221,8 @@ impl Channel {
             self.monitor().set_data_count(self.data_count_native());
         }
         if let Some(user_config_data_type) = self.monitor().user_config_data_type() {
-            self.monitor().set_data_type(user_config_data_type);
+            self.monitor()
+                .set_data_type(user_config_data_type.resolve(self));
         } else {
             self.monitor().set_data_type(self.dbr_type_native());
         }
@@ -222,12 +244,14 @@ impl Channel {
         };
 
         // tell server to start the monitor: send out CA_PROTO_EVENT_ADD
-        match tcp.send_msgs(vec![msg]).await {
-            Ok(_) => {}
-            Err(error) => {
-                // do nothing, this is handled by periodic TCP alive check
-            }
-        };
+        tcp.send_msgs(vec![msg]);
+
+        // .await {
+        //     Ok(_) => {}
+        //     Err(error) => {
+        //         // do nothing, this is handled by periodic TCP alive check
+        //     }
+        // };
     }
 
     /**
@@ -236,7 +260,7 @@ impl Channel {
      * The local monitor state is changed to [`MonitorState::NotRunning`] then send
      * send `CA_PROTO_EVENT_CANCEL`
      */
-    pub async fn cancel_monitor(self: &Self, sid: u32, subid: u32, dest: Option<SocketAddr>) {
+    pub fn cancel_monitor(self: &Self, sid: u32, subid: u32, dest: Option<SocketAddr>) {
         if self.monitor_state() == MonitorState::NotRunning {
             // already stopped
             return;
@@ -255,10 +279,11 @@ impl Channel {
                 match tcp {
                     Some(tcp) => {
                         // tell server to release resource: send out CA_PROTO_EVENT_CANCEL
-                        match tcp.send_msgs(vec![msg]).await {
-                            Ok(_) => {}
-                            Err(error) => {}
-                        };
+                        tcp.send_msgs(vec![msg]);
+                        // .await {
+                        //     Ok(_) => {}
+                        //     Err(error) => {}
+                        // };
                     }
                     None => {}
                 }

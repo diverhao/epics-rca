@@ -1,9 +1,14 @@
 use crate::ca::message::CaMsg;
 use crate::ca::message_handler::handle_tcp_msgs;
+use crate::channel;
 use crate::context::context::get_context;
 use log::debug;
 use log::error;
 use log::warn;
+use std::collections::HashSet;
+use std::collections::VecDeque;
+use std::collections::vec_deque;
+use std::hash::Hash;
 use std::{
     net::SocketAddr,
     sync::{
@@ -23,49 +28,44 @@ pub struct TCP {
     reader: Arc<Mutex<Option<OwnedReadHalf>>>,
     writer: Arc<Mutex<Option<OwnedWriteHalf>>>,
     read_task: Mutex<Option<JoinHandle<()>>>,
-    connected: AtomicBool,
+    connected: RwLock<bool>,
     addr: SocketAddr,
-    cids: RwLock<Vec<u32>>,
+    cids: RwLock<HashSet<u32>>,
     check_alive_task: Mutex<Option<JoinHandle<()>>>,
     alive: AtomicBool,
     paused: AtomicBool,
+    queue_msg_send: RwLock<VecDeque<CaMsg>>,
 }
 
 impl TCP {
-    pub async fn new(addr: SocketAddr) -> Result<Self, String> {
-        let ip = addr.ip();
-        let port = addr.port();
-        let addr = format!("{ip}:{port}");
-        let stream = TcpStream::connect(addr).await;
-        if let Ok(stream) = stream {
-            let addr = stream.peer_addr().map_err(|err| err.to_string())?;
-            let (reader, writer) = stream.into_split();
-            let tcp = TCP {
-                reader: Arc::new(Mutex::new(Some(reader))),
-                writer: Arc::new(Mutex::new(Some(writer))),
-                read_task: Mutex::new(None),
-                connected: AtomicBool::new(true),
-                addr: addr,
-                cids: RwLock::new(vec![]),
-                check_alive_task: Mutex::new(None),
-                alive: AtomicBool::new(true),
-                paused: AtomicBool::new(false),
-            };
-            Ok(tcp)
-        } else {
-            Err(String::from(
-                "Error: failed to create TCP stream with {ip}:{port}",
-            ))
-        }
+    // pub async fn new(addr: SocketAddr) -> Result<Self, String> {
+    // }
+
+    pub fn start_to_write(self: Arc<Self>) {
+        let tcp = Arc::new(self);
+        tokio::spawn(async move {
+            loop {
+                if !tcp.is_connected() {
+                    break;
+                }
+                // wait 5 ms
+                tokio::time::sleep(Duration::from_millis(5)).await;
+                tcp.send_queue_msg().await;
+            }
+        });
     }
 
     /**
      * Close tcp connection, update connection state, stop the periodic task, and unregister this
      * TCP from TCPs.
      */
-    pub async fn disconnect(&self, abort_read_task: bool, stop_check_alive_task: bool) {
+    pub async fn disconnect(self: &Self, abort_read_task: bool, stop_check_alive_task: bool) {
         // Update connect state
+        // self.set_state(TcpState::NotConnected);
         self.set_connected(false);
+
+        // clear send queue
+        self.queue_msg_send_mut().clear();
 
         // Stop self-checking alive, i.e. periodically sending out CA_PROTO_ECHO
         if stop_check_alive_task {
@@ -127,7 +127,7 @@ impl TCP {
             let mut buf: Vec<u8> = vec![];
             // read up to 4 kB each time
             let mut buf_pending: [u8; 4096] = [0_u8; 4096];
-
+            let mut packet_count = 0;
             loop {
                 if !tcp.is_connected() {
                     break;
@@ -156,6 +156,7 @@ impl TCP {
                         break;
                     }
                     Ok(size) => {
+                        packet_count = packet_count + 1;
                         debug!("Received {size} TCP bytes from {}", tcp.addr());
                         buf.extend_from_slice(&buf_pending[..size]);
                         let msgs = CaMsg::from_buf(&mut buf, Some(tcp.addr().clone()), vec![]);
@@ -189,7 +190,7 @@ impl TCP {
                     return Ok(());
                 }
                 Err(err) => {
-                    error!("{err}");
+                    error!("Send buffer failed: {err}");
                     return Err(err.to_string());
                 }
             },
@@ -200,24 +201,42 @@ impl TCP {
         }
     }
 
-    pub async fn send_msgs(&self, msgs: Vec<CaMsg>) -> Result<(), String> {
-        if !self.is_connected() {
-            return Err("TCP not connected".to_string());
+    pub async fn send_queue_msg(self: &Self) {
+        let mut buf: Vec<u8> = vec![];
+        let msgs = {
+            let mut queue = self.queue_msg_send_mut();
+            let n = queue.len().min(1024);
+            queue.drain(..n).collect::<Vec<_>>()
+        };
+
+        if msgs.is_empty() {
+            return;
         }
 
-        let mut buf: Vec<u8> = vec![];
-        for msg in msgs {
+        for msg in msgs.iter() {
             debug!("\nSending TCP message {msg}");
             buf.extend_from_slice(&msg.to_buf());
         }
+
         match self.send_buf(&buf).await {
             Ok(_) => {
-                return Ok(());
+                // return Ok(());
             }
             Err(error) => {
-                return Err(error);
+                println!("fail");
             }
         }
+    }
+
+    /**
+     * Push messages to TCP send queue
+     */
+    pub fn send_msgs(&self, msgs: Vec<CaMsg>) {
+        if !self.is_connected() {
+            return; // Err("TCP not connected".to_string());
+        }
+        // add to send-buffer queue
+        self.add_to_queue_msg_send(msgs);
     }
 
     /**
@@ -240,9 +259,9 @@ impl TCP {
         self.reconnect_channels().await;
     }
 
-    pub fn is_connected(&self) -> bool {
-        self.connected.load(Ordering::Acquire)
-    }
+    // pub fn state(&self) -> RwLockReadGuard<'_, TcpState> {
+    //     self.state.read().unwrap()
+    // }
 
     async fn reader(self: &Self) -> MutexGuard<'_, Option<OwnedReadHalf>> {
         self.reader.lock().await
@@ -256,30 +275,22 @@ impl TCP {
     }
 
     pub fn add_cid(self: &Self, cid: u32) {
-        let mut cids_mut = self.cids.write().unwrap();
-        if !cids_mut.contains(&cid) {
-            cids_mut.push(cid);
-        } else {
-            // do nothing
-        }
+        self.cids_mut().insert(cid);
     }
 
     pub fn remove_cid(self: &Self, cid: u32) {
-        let mut cids_mut = self.cids.write().unwrap();
-        if let Some(pos) = cids_mut.iter().position(|&existing| existing == cid) {
-            cids_mut.swap_remove(pos);
-        }
+        self.cids_mut().remove(&cid);
     }
 
-    pub fn set_connected(self: &Self, connected: bool) {
-        self.connected.store(connected, Ordering::Release);
-    }
+    // pub fn set_state(self: &Self, new_state: TcpState) {
+    //     *self.state.write().unwrap() = new_state;
+    // }
 
-    pub fn cids(self: &Self) -> RwLockReadGuard<'_, Vec<u32>> {
+    pub fn cids(self: &Self) -> RwLockReadGuard<'_, HashSet<u32>> {
         self.cids.read().unwrap()
     }
 
-    pub fn cids_mut(self: &Self) -> RwLockWriteGuard<'_, Vec<u32>> {
+    pub fn cids_mut(self: &Self) -> RwLockWriteGuard<'_, HashSet<u32>> {
         self.cids.write().unwrap()
     }
 
@@ -291,7 +302,7 @@ impl TCP {
 
         let tcp = Arc::clone(&self);
         let handle = tokio::spawn(async move {
-            let mut interval = time::interval(Duration::from_secs(5));
+            let mut interval = time::interval(Duration::from_secs(30));
 
             loop {
                 interval.tick().await;
@@ -305,6 +316,7 @@ impl TCP {
                     break;
                 }
 
+                println!("current alive status is {}", tcp.alive());
                 if tcp.alive() {
                     // will be reset to true when tcp receives the echo reply
                     tcp.set_alive(false);
@@ -313,6 +325,7 @@ impl TCP {
                     // Connection is broken, handle the failure
                     tcp.set_alive(true);
                     // tcp failed
+                    error!("TCP alive check failed");
                     tcp.handle_tcp_failure(true, false).await;
                     break;
                 }
@@ -320,10 +333,7 @@ impl TCP {
                 // send CA_PROTO_ECHO
                 let addr = tcp.addr().clone();
                 let msg = CaMsg::build_echo(&vec![addr]);
-                match tcp.send_msgs(vec![msg]).await {
-                    Ok(_) => {}
-                    Err(_) => {}
-                }
+                tcp.send_msgs(vec![msg]);
             }
         });
         *task = Some(handle);
@@ -344,6 +354,22 @@ impl TCP {
         self.alive.load(Ordering::Relaxed)
     }
 
+    pub fn is_connected(self: &Self) -> bool {
+        self.connected.read().unwrap().clone()
+    }
+
+    pub fn set_connected(self: &Self, connected: bool) {
+        *self.connected.write().unwrap() = connected;
+    }
+
+    pub async fn set_reader(self: &Self, reader: OwnedReadHalf) {
+        *self.reader().await = Some(reader);
+    }
+
+    pub async fn set_writer(self: &Self, writer: OwnedWriteHalf) {
+        *self.writer().await = Some(writer);
+    }
+
     pub fn set_paused(&self, alive: bool) {
         self.paused
             .store(alive, std::sync::atomic::Ordering::Relaxed);
@@ -353,28 +379,42 @@ impl TCP {
         self.paused.load(Ordering::Relaxed)
     }
 
-    pub async fn pause(self: &Self) {
+    pub fn pause(self: &Self) {
         let dest = self.addr().clone();
         let msg = CaMsg::build_event_off(&vec![dest]);
         self.set_paused(true);
-        match self.send_msgs(vec![msg]).await {
-            Ok(_) => {}
-            Err(_) => {
-                self.set_paused(false);
-            }
-        }
+        self.send_msgs(vec![msg]);
+        // .await {
+        //     Ok(_) => {}
+        //     Err(_) => {
+        //         self.set_paused(false);
+        //     }
+        // }
     }
 
-    pub async fn unpause(self: &Self) {
+    pub fn unpause(self: &Self) {
         let dest = self.addr().clone();
         let msg = CaMsg::build_event_on(&vec![dest]);
         self.set_paused(false);
-        match self.send_msgs(vec![msg]).await {
-            Ok(_) => {}
-            Err(_) => {
-                self.set_paused(true);
-            }
-        }
+        self.send_msgs(vec![msg]);
+        // .await {
+        //     Ok(_) => {}
+        //     Err(_) => {
+        //         self.set_paused(true);
+        //     }
+        // }
+    }
+
+    pub fn queue_msg_send_mut(self: &Self) -> RwLockWriteGuard<'_, VecDeque<CaMsg>> {
+        self.queue_msg_send.write().unwrap()
+    }
+
+    pub fn queue_msg_send(self: &Self) -> RwLockReadGuard<'_, VecDeque<CaMsg>> {
+        self.queue_msg_send.read().unwrap()
+    }
+
+    pub fn add_to_queue_msg_send(self: &Self, msgs: Vec<CaMsg>) {
+        self.queue_msg_send_mut().extend(msgs);
     }
 }
 
@@ -408,6 +448,18 @@ impl TCPs {
         warn!("Failed to remove {addr} from TCPs: it does not exist ");
     }
 
+    // pub fn remove_tcp_by_id(self: &Self, id: u32) {
+    //     let mut tcps = self.tcps_mut();
+    //     for index in 0..tcps.len() {
+    //         let tcp = &tcps[index];
+    //         if (*tcp).id() == id {
+    //             tcps.remove(index);
+    //             return;
+    //         }
+    //     }
+    //     warn!("Failed to remove {id} from TCPs: it does not exist ");
+    // }
+
     pub fn tcps_mut(self: &Self) -> RwLockWriteGuard<'_, Vec<Arc<TCP>>> {
         self.tcps.write().unwrap()
     }
@@ -421,50 +473,113 @@ impl TCPs {
         None
     }
 
+    // pub fn find_connected_tcp(self: &Self, addr: &SocketAddr) -> Option<Arc<TCP>> {
+    //     for tcp in self.tcps().iter() {
+    //         if *tcp.addr() == *addr && tcp.is_connected() {
+    //             return Some(tcp.clone());
+    //         }
+    //     }
+    //     return None;
+    // }
+
     /**
      * Returns Ok<Arc<TCP>> if creation is successful.
      *
      * Returns Err<String> if creation fails or timeout (10 seconds).
      */
     pub async fn create_tcp(self: &Self, addr: SocketAddr) -> Result<Arc<TCP>, String> {
-        if let Some(tcp) = self.tcp(&addr) {
+        if let Some(tcp) = self.tcp(&addr)
+            && tcp.is_connected()
+        {
             // this tcp already exists
             debug!("TCP {addr} already exists");
             return Ok(tcp);
         } else {
             // tcp may take long while to create
-            let tcp = match timeout(Duration::from_secs(10), async move {
-                let tcp: Result<TCP, String> = TCP::new(addr).await;
-                tcp
+            let id = rand::random::<u32>();
+            let id1 = id;
+            let tcp: Arc<TCP> = Arc::new(TCP {
+                reader: Arc::new(Mutex::new(None)),
+                writer: Arc::new(Mutex::new(None)),
+                read_task: Mutex::new(None),
+                connected: RwLock::new(false),
+                addr: addr,
+                cids: RwLock::new(HashSet::new()),
+                check_alive_task: Mutex::new(None),
+                alive: AtomicBool::new(true),
+                paused: AtomicBool::new(false),
+                queue_msg_send: RwLock::new(VecDeque::from([])),
+            });
+
+            self.tcps_mut().push(Arc::clone(&tcp));
+
+            match timeout(Duration::from_secs(10), async move {
+                // let tcp: Result<TCP, String> = TCP::new(addr).await;
+                let ip = addr.ip();
+                let port = addr.port();
+                // check if TCPs has one such TCP, if a tcp exists and already connected
+                // just return it, otherwise start to connect this TCP
+                if let Some(another_tcp) = self.tcp(&addr) {
+                    return Ok((another_tcp, false));
+                }
+
+                let stream = TcpStream::connect(addr).await;
+                if let Some(another_tcp) = self.tcp(&addr) {
+                    return Ok((another_tcp, false));
+                }
+
+                if let Ok(stream) = stream {
+                    let (reader, writer) = stream.into_split();
+                    tcp.set_reader(reader).await;
+                    tcp.set_writer(writer).await;
+                    if let Some(another_tcp) = self.tcp(&addr) {
+                        {
+                            let mut reader = tcp.reader().await;
+                            reader.take();
+                        }
+
+                        let writer = {
+                            let mut writer = tcp.writer().await;
+                            writer.take()
+                        };
+
+                        if let Some(mut writer) = writer {
+                            let _ =
+                                tokio::time::timeout(Duration::from_millis(100), writer.shutdown())
+                                    .await;
+                        }
+                        return Ok((another_tcp, false));
+                    }
+                    tcp.set_connected(true);
+                    Ok((tcp, true))
+                } else {
+                    Err(String::from(
+                        "Error: failed to create TCP stream with {ip}:{port}",
+                    ))
+                }
             })
             .await
             {
-                Ok(Ok(tcp)) => tcp,
+                Ok(Ok((tcp, is_new))) => {
+                    if is_new {
+                        let tcp_listener = Arc::clone(&tcp);
+                        tcp_listener.start_to_listen().await;
+
+                        let tcp_writer = Arc::clone(&tcp);
+                        tcp_writer.start_to_write();
+
+                        let tcp_check_alive = Arc::clone(&tcp);
+                        tcp_check_alive.start_check_alive().await;
+                    }
+                    return Ok(tcp);
+                }
                 Ok(Err(_)) => {
                     return Err("".to_string());
                 }
                 Err(_) => {
                     return Err("".to_string());
                 }
-            };
-
-            // check again if TCPs has one such TCP
-            // in case another TCP with same addr is created during the above await
-            if let Some(tcp) = self.tcp(&addr) {
-                // the above newly created tcp is automatically dropped
-                return Ok(tcp);
             }
-
-            let tcp = Arc::new(tcp);
-            self.tcps_mut().push(Arc::clone(&tcp));
-
-            let tcp_listener = Arc::clone(&tcp);
-            tcp_listener.start_to_listen().await;
-
-            let tcp_check_alive = Arc::clone(&tcp);
-            tcp_check_alive.start_check_alive().await;
-
-            Ok(tcp)
         }
     }
 }

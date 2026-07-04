@@ -9,21 +9,23 @@ mod udp;
 
 use crate::channel::channel::Channel;
 use crate::channel::dbr::DbrValue;
+use crate::channel::monitor::MonitorDataType;
 use crate::context::context::create_context;
 use crate::context::context::get_context;
 use ::log::LevelFilter;
 use ::log::debug;
+use std::fmt::format;
 use std::sync::{Arc, RwLock, RwLockReadGuard, RwLockWriteGuard};
 use tokio::time::{Duration, sleep};
 
-#[tokio::main]
+#[tokio::main(flavor = "current_thread")]
 async fn main() {
     create_context(
         vec![
             ("EPICS_CA_ADDR_LIST", "127.0.0.1"),
             ("EPICS_CA_AUTO_ADDR_LIST", "NO"),
         ],
-        LevelFilter::Debug,
+        LevelFilter::Error,
     )
     .await;
 
@@ -39,32 +41,33 @@ async fn main() {
     // let data = Arc::new(RwLock::new(0.0));
     // let data_for_callback = Arc::clone(&data);
 
-    let channel1 = context.create_channel("val1");
+    // let channel1 = context.create_channel("val1");
     // let channel5 = context.create_channel("val5");
-    println!("{}", context.channels());
+    // println!("{}", context.channels());
 
     // channel.get(channel::dbr::DbrType::StsDouble, 1).await;
     // channel1.get(Some(5.0), None, None, None).await;
 
-    let callback1 = move |channel: &Channel| {
-        debug!(
-            "{} has a new value: {:?}, {}",
-            channel.name(),
-            channel.value(),
-            channel.meta()
-        );
-        let value = match channel.value().clone().unwrap() {
-            DbrValue::Double(value) => Some(value),
-            _ => None,
-        };
-        if let Some(value) = value {
-            // *data_for_callback.write().unwrap() = value[0];
-            debug!("{:?}", value);
-        }
-        if let Some(data) = channel.dbr_data(channel.dbr_type_native_as_time()) {
-            debug!("------------------------------>>>{}", data);
-        }
-    };
+    let callback1 = Arc::new(move |channel: &Channel| {
+        // println!(">> {}", channel.name());
+        // debug!(
+        //     "{} has a new value: {:?}, {}",
+        //     channel.name(),
+        //     channel.value(),
+        //     channel.meta()
+        // );
+        // let value = match channel.value().clone().unwrap() {
+        //     DbrValue::Double(value) => Some(value),
+        //     _ => None,
+        // };
+        // if let Some(value) = value {
+        //     // *data_for_callback.write().unwrap() = value[0];
+        //     debug!("{:?}", value);
+        // }
+        // if let Some(data) = channel.dbr_data(channel.dbr_type_native_as_time()) {
+        //     debug!("------------------------------>>>{}", data);
+        // }
+    });
     // let callback5 = move |channel: &Channel| {
     //     debug!(
     //         "{} has a new value: {:?}, {}",
@@ -82,13 +85,14 @@ async fn main() {
     //     }
     // };
 
-    channel1
-        .start_to_monitor(
-            Some(channel1.dbr_type_native_as_time()),
-            None,
-            Some(Arc::new(callback1)),
-        )
-        .await;
+    // let callback_1a = Arc::clone(&callback1);
+    // channel1
+    //     .start_to_monitor(
+    //         Some(MonitorDataType::NativeCtrl),
+    //         None,
+    //         Some(callback_1a),
+    //     )
+    //     .await;
     // println!("+++++++++++++++++++++++++++++++++++++++++++++++");
     // channel5
     //     .start_to_monitor(
@@ -108,7 +112,21 @@ async fn main() {
     //     channel
     // );
     // context.create_channel("val2afadsfsa");
-    println!("{}", context.channels());
+    // println!("{}", context.channels());
+
+    for ii in 0..100000 {
+        let callback = Arc::clone(&callback1);
+        // println!("{}", ii);
+        let context = get_context().clone();
+        // tokio::spawn(async move {
+        let name = format!("val{}", ii);
+        // println!("{}", name);
+        let channel = context.create_channel(&name);
+        channel.start_to_monitor(Some(MonitorDataType::NativeTime), None, Some(callback));
+        println!("-->{}", name);
+        // });
+    }
+
     tokio::signal::ctrl_c()
         .await
         .expect("failed to listen for Ctrl-C");
