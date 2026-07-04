@@ -123,7 +123,7 @@ async fn main() {
         // println!("{}", name);
         let channel = context.create_channel(&name);
         channel.start_to_monitor(Some(MonitorDataType::NativeTime), None, Some(callback));
-        println!("-->{}", name);
+        // println!("-->{}", name);
         // });
     }
 

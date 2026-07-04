@@ -135,7 +135,7 @@ pub fn handle_ca_proto_search(msg: CaMsg) {
         // assign TCP to this channel
         channel.set_addr(Some(server_addr));
         // send handshake messages
-        channel.send_handshake();
+        channel.send_connect_chan();
         return;
     } else {
         tokio::spawn(async move {

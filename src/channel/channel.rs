@@ -94,10 +94,10 @@ impl Channel {
         // assign TCP to this channel
         self.set_addr(Some(addr));
         // send handshake messages
-        self.send_handshake();
+        self.send_connect_chan();
     }
 
-    pub fn send_handshake(self: &Self) {
+    pub fn send_connect_chan(self: &Self) {
         let dest = match self.addr() {
             Some(dest) => dest,
             None => return,

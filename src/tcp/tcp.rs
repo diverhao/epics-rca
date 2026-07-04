@@ -626,6 +626,13 @@ impl TCPs {
                     let tcp_check_alive = Arc::clone(&tcp);
                     tcp_check_alive.start_check_alive().await;
 
+                    // send handshake
+                    let dests = vec![addr];
+                    let version_msg = CaMsg::build_version(&dests);
+                    let client_name_msg = CaMsg::build_client_name(&dests);
+                    let host_name_msg = CaMsg::build_host_name(&dests);
+                    tcp.send_msgs(vec![version_msg, client_name_msg, host_name_msg]);
+
                     // async work is done
                     // todo: notify waiters to go
                     tcp.connect_notify.notify_waiters();
