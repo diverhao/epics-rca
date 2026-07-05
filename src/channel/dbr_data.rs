@@ -112,7 +112,7 @@ pub struct GrEnumData {
     pub status: ChannelStatus,
     pub severity: ChannelSeverity,
     pub number_of_string_used: i16,
-    pub strings: [String; 16],
+    pub strings: Vec<String>,
 }
 
 #[derive(Clone, Debug)]
@@ -162,7 +162,7 @@ pub struct CtrlEnumData {
     pub status: ChannelStatus,
     pub severity: ChannelSeverity,
     pub number_of_string_used: i16,
-    pub strings: [String; 16],
+    pub strings: Vec<String>,
 }
 
 #[derive(Clone, Debug)]

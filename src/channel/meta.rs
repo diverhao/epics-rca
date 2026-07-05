@@ -31,7 +31,7 @@ pub struct Meta {
     pub padding: RwLock<i16>,
     // enum
     pub number_of_string_used: RwLock<i16>,
-    pub strings: RwLock<[String; 16]>, // 16 elements, each with up to 26 C chars
+    pub strings: RwLock<Vec<String>>, // 16 elements, each with up to 26 C chars
     // limits
     pub upper_display_limit: RwLock<i16>,
     pub lower_display_limit: RwLock<i16>,
@@ -56,7 +56,7 @@ impl Meta {
             precision: RwLock::new(0),
             padding: RwLock::new(0),
             number_of_string_used: RwLock::new(0),
-            strings: RwLock::new(std::array::from_fn(|_| String::new())),
+            strings: RwLock::new(vec![]),
             upper_display_limit: RwLock::new(0),
             lower_display_limit: RwLock::new(0),
             upper_alarm_limit: RwLock::new(0),
@@ -116,7 +116,7 @@ impl Meta {
         self.number_of_string_used.read().unwrap().clone()
     }
 
-    pub fn strings(&self) -> [String; 16] {
+    pub fn strings(&self) -> Vec<String> {
         self.strings.read().unwrap().clone()
     }
 
@@ -158,7 +158,7 @@ impl Meta {
         self.set_precision(0);
         self.set_padding(0);
         self.set_number_of_string_used(0);
-        self.set_strings(std::array::from_fn(|_| String::new()));
+        self.set_strings(vec![]);
         self.set_upper_display_limit(0);
         self.set_lower_display_limit(0);
         self.set_upper_alarm_limit(0);
@@ -211,7 +211,7 @@ impl Meta {
         *self.number_of_string_used.write().unwrap() = new_number_of_string_used;
     }
 
-    pub fn set_strings(&self, new_strings: [String; 16]) {
+    pub fn set_strings(&self, new_strings: Vec<String>) {
         *self.strings.write().unwrap() = new_strings;
     }
 
@@ -337,7 +337,7 @@ impl Channel {
         self.meta().number_of_string_used()
     }
 
-    pub fn strings(&self) -> [String; 16] {
+    pub fn strings(&self) -> Vec<String> {
         self.meta().strings()
     }
 
@@ -439,7 +439,7 @@ impl Channel {
             .set_number_of_string_used(new_number_of_string_used);
     }
 
-    pub fn set_strings(&self, new_strings: [String; 16]) {
+    pub fn set_strings(&self, new_strings: Vec<String>) {
         self.meta().set_strings(new_strings);
     }
 

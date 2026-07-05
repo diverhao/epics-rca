@@ -659,20 +659,14 @@ impl Channel {
             return;
         }
 
-        let mut invalid_string = false;
-        let strings = std::array::from_fn(|i| {
+        let mut strings = Vec::with_capacity(number_of_string_used as usize);
+        for i in 0..number_of_string_used as usize {
             let start = 6 + i * DBR_ENUM_STRING_SIZE;
             let end = start + DBR_ENUM_STRING_SIZE;
-            match Self::fixed_c_string(&buf[start..end]) {
-                Some(string) => string,
-                None => {
-                    invalid_string = true;
-                    String::new()
-                }
-            }
-        });
-        if invalid_string {
-            return;
+            let Some(string) = Self::fixed_c_string(&buf[start..end]) else {
+                return;
+            };
+            strings.push(string);
         }
 
         self.set_status(status);

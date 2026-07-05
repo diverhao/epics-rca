@@ -379,14 +379,14 @@ impl Channels {
         msgs_size = version_msg.size();
         msgs.push(version_msg);
 
-        let mut name_searching_counter = 0;
-        let mut name_found_counter = 0;
-        let mut tcp_connected_counter = 0;
-        let mut created_counter = 0;
-        let mut destroyed_counter = 0;
-        let mut monitor_not_running_counter = 0;
-        let mut monitor_starting_counter = 0;
-        let mut monitor_running_counter = 0;
+        // let mut name_searching_counter = 0;
+        // let mut name_found_counter = 0;
+        // let mut tcp_connected_counter = 0;
+        // let mut created_counter = 0;
+        // let mut destroyed_counter = 0;
+        // let mut monitor_not_running_counter = 0;
+        // let mut monitor_starting_counter = 0;
+        // let mut monitor_running_counter = 0;
 
         let mut version_count = 0;
 
@@ -402,20 +402,20 @@ impl Channels {
                 continue;
             }
 
-            match channel_state {
-                ChannelState::NameSearching => name_searching_counter += 1,
-                ChannelState::NameFound => name_found_counter += 1,
-                ChannelState::TcpConnected => tcp_connected_counter += 1,
-                ChannelState::Created => created_counter += 1,
-                ChannelState::Destroyed => destroyed_counter += 1,
-            }
+            // match channel_state {
+            //     ChannelState::NameSearching => name_searching_counter += 1,
+            //     ChannelState::NameFound => name_found_counter += 1,
+            //     ChannelState::TcpConnected => tcp_connected_counter += 1,
+            //     ChannelState::Created => created_counter += 1,
+            //     ChannelState::Destroyed => destroyed_counter += 1,
+            // }
 
-            let monitor_state = channel.monitor_state();
-            match monitor_state {
-                MonitorState::NotRunning => monitor_not_running_counter += 1,
-                MonitorState::Starting => monitor_starting_counter += 1,
-                MonitorState::Running => monitor_running_counter += 1,
-            }
+            // let monitor_state = channel.monitor_state();
+            // match monitor_state {
+            //     MonitorState::NotRunning => monitor_not_running_counter += 1,
+            //     MonitorState::Starting => monitor_starting_counter += 1,
+            //     MonitorState::Running => monitor_running_counter += 1,
+            // }
 
             channel.set_state(ChannelState::NameSearching, true);
 
