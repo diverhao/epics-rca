@@ -116,9 +116,9 @@ impl Channel {
         let create_chan_msg = CaMsg::build_create_chan(self.name(), self.cid(), &dests);
 
         tcp.send_msgs(vec![
-            version_msg,
-            client_name_msg,
-            host_name_msg,
+            // version_msg,
+            // client_name_msg,
+            // host_name_msg,
             create_chan_msg,
         ]);
         //     .await
@@ -200,8 +200,8 @@ impl Channel {
 
         // Remove from Channels.by_name and Channels.by_cid.
         if !reconnect {
-            channels.remove_by_cid_channel(self.cid());
-            channels.remove_by_name_channel(self.name().to_string());
+            channels.remove_by_cid(self.cid());
+            channels.remove_by_name(self.name());
         }
     }
 

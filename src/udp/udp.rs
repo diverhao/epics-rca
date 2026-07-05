@@ -65,12 +65,12 @@ impl UDP {
         let udp_v4 = Arc::clone(&self);
         let udp_v6 = Arc::clone(&self);
         tokio::spawn(async move {
-            let mut buf: Vec<u8> = vec![0_u8; MAX_UDP_SEND];
+            let mut buf: Vec<u8> = vec![0_u8; 1024*1024];
             loop {
                 match socket_v4.recv_from(&mut buf).await {
                     Ok((size, remote_socket)) => {
                         let mut buf: Vec<u8> = buf[..size].to_vec();
-                        let msgs = CaMsg::from_buf(&mut buf, Some(remote_socket), vec![]);
+                        let msgs = CaMsg::from_buf(&mut buf, Some(remote_socket), vec![], false);
                         handle_udp_msgs(&remote_socket, msgs);
                     }
                     Err(err) => {
@@ -80,12 +80,12 @@ impl UDP {
             }
         });
         tokio::spawn(async move {
-            let mut buf = [0_u8; MAX_UDP_SEND];
+            let mut buf = [0_u8; 1024*1024];
             loop {
                 match socket_v6.recv_from(&mut buf).await {
                     Ok((size, remote_socket)) => {
                         let mut buf: Vec<u8> = buf[..size].to_vec();
-                        let msgs = CaMsg::from_buf(&mut buf, Some(remote_socket), vec![]);
+                        let msgs = CaMsg::from_buf(&mut buf, Some(remote_socket), vec![], false);
                         handle_udp_msgs(&remote_socket, msgs);
                     }
                     Err(err) => {
@@ -98,7 +98,7 @@ impl UDP {
 
     // -------------- network ----------------------
 
-    async fn send_buf(self: &Self, buf: &Vec<u8>) {
+    pub async fn send_buf(self: &Self, buf: &Vec<u8>) {
         // send to addresses in EPICS_CA_ADDR_LIST
         for socket_addr in self.ca_addr_list() {
             match socket_addr {

@@ -124,6 +124,7 @@ impl CaMsg {
         buf: &mut Vec<u8>,
         src: Option<SocketAddr>,
         dest: Vec<SocketAddr>,
+        is_tcp: bool
     ) -> Vec<CaMsg> {
         let mut msgs: Vec<CaMsg> = vec![];
         loop {
@@ -156,6 +157,9 @@ impl CaMsg {
                             // Warning
                             // the remaining buffer is not long enough, stop decoding
                             // do not clear the buffer
+                            if !is_tcp {
+                                buf.clear();
+                            }
                             return msgs;
                         }
                     }

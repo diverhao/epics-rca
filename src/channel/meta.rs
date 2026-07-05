@@ -44,7 +44,7 @@ pub struct Meta {
 impl Meta {
     pub fn new() -> Arc<Meta> {
         Arc::new(Meta {
-            state: RwLock::new(ChannelState::NeverConnected),
+            state: RwLock::new(ChannelState::NameSearching),
             access_right: RwLock::new(ChannelAccessRights::None),
             status: RwLock::new(ChannelStatus::NoAlarm),
             severity: RwLock::new(ChannelSeverity::NoAlarm),
@@ -368,7 +368,31 @@ impl Channel {
     // --------------- setters -------------------
 
     pub fn set_state(&self, new_state: ChannelState, notify_state: bool) {
+        let old_state = self.state();
+
+        let channels = get_context().channels();
+        if old_state == ChannelState::NameSearching
+            && (new_state == ChannelState::Destroyed
+                || new_state == ChannelState::Created
+                || new_state == ChannelState::NameFound
+                || new_state == ChannelState::TcpConnected
+                )
+        {
+            channels.move_to_not_searching_by_cid(self.cid());
+        } else if new_state == ChannelState::NameSearching
+            && (old_state == ChannelState::Destroyed
+                || old_state == ChannelState::Created
+                || old_state == ChannelState::NameFound
+                || old_state == ChannelState::TcpConnected
+                )
+        {
+            channels.move_to_searching_by_cid(self.cid());
+        } else {
+            // do nothing
+        }
+
         self.meta().set_state(new_state);
+
         // if notify_state {
         //     self.state_change_notifier().notify_waiters();
         // }

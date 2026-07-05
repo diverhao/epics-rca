@@ -11,6 +11,7 @@ use ::log::{debug, warn};
 use std::net::IpAddr;
 use std::net::Ipv4Addr;
 use std::net::SocketAddr;
+use std::sync::atomic::{AtomicBool, AtomicU32, Ordering};
 use std::sync::{Arc, RwLock, RwLockReadGuard, RwLockWriteGuard};
 
 /**
@@ -106,22 +107,22 @@ pub fn handle_ca_proto_search(msg: CaMsg) {
     let channels = context.channels();
 
     // find the channel
-    let channel = match channels.channel_by_cid(search_id) {
+    let channel: Arc<channel::channel::Channel> = match channels.channel_by_cid(search_id) {
         Some(channel) => channel,
         None => return, // channel not found
     };
 
     let state = channel.state();
-    if state != ChannelState::NeverConnected && state != ChannelState::NameSearching {
+    if state != ChannelState::NameSearching {
         // duplicated search success message from server
-        debug!(
+        warn!(
             "Channel must be at NeverConnected or NameSearching state for CA_PROTO_SEARCH, but now is {:?}",
             state
         );
         return;
     }
 
-    // update state
+    // update state and move channel from searching list to not_searching list
     channel.set_state(ChannelState::NameFound, true);
 
     // connect TCP (if not connected yet), and send handshake packets

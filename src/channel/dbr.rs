@@ -33,7 +33,6 @@ const DBR_STSACK_STRING_VALUE_OFFSET: u32 = 8;
 
 #[derive(Copy, Clone, Debug, PartialEq)]
 pub enum ChannelState {
-    NeverConnected, // initial state
     NameSearching,  // start to send CA_PROTO_SEARCH
     NameFound, // after get CA_PROTO_SEARCH reply, next try to establish tcp connection with server
     TcpConnected, // after tcp connected, next send handshake packets: CA_PROTO_VERSION, CA_PROTO_CLIENT_NAME, CA_PROTO_HOST_NAME, CA_PROTO_CREATE_CHAN

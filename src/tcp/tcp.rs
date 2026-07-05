@@ -58,7 +58,7 @@ impl TCP {
                     break;
                 }
                 // wait 5 ms
-                tokio::time::sleep(Duration::from_millis(5)).await;
+                tokio::time::sleep(Duration::from_millis(50)).await;
                 tcp.send_queue_msg().await;
             }
         });
@@ -168,7 +168,7 @@ impl TCP {
                         debug!("Received {size} TCP bytes from {}", tcp.addr());
                         buf.extend_from_slice(&buf_pending[..size]);
 
-                        let msgs = CaMsg::from_buf(&mut buf, Some(tcp.addr().clone()), vec![]);
+                        let msgs = CaMsg::from_buf(&mut buf, Some(tcp.addr().clone()), vec![], true);
                         let src = *tcp.addr();
                         handle_tcp_msgs(&src, msgs);
                     }
@@ -215,6 +215,7 @@ impl TCP {
         let msgs = {
             let mut queue = self.queue_msg_send_mut();
             let n = queue.len().min(4096);
+            // println!("Sending {} tcp messages", n);
             queue.drain(..n).collect::<Vec<_>>()
         };
 
@@ -632,6 +633,11 @@ impl TCPs {
                     let client_name_msg = CaMsg::build_client_name(&dests);
                     let host_name_msg = CaMsg::build_host_name(&dests);
                     tcp.send_msgs(vec![version_msg, client_name_msg, host_name_msg]);
+                    // wait for 500 ms to send out the packet
+                    match timeout(Duration::from_millis(500), async move {}).await {
+                        Ok(_) => {}
+                        Err(_) => {}
+                    };
 
                     // async work is done
                     // todo: notify waiters to go

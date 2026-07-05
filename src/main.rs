@@ -10,6 +10,7 @@ mod udp;
 use crate::channel::channel::Channel;
 use crate::channel::dbr::DbrValue;
 use crate::channel::monitor::MonitorDataType;
+use crate::channel::monitor::MonitorState;
 use crate::context::context::create_context;
 use crate::context::context::get_context;
 use ::log::LevelFilter;
@@ -17,8 +18,10 @@ use ::log::debug;
 use std::fmt::format;
 use std::sync::{Arc, RwLock, RwLockReadGuard, RwLockWriteGuard};
 use tokio::time::{Duration, sleep};
+use tokio::time::{self};
 
 #[tokio::main(flavor = "current_thread")]
+// #[tokio::main(flavor = "multi_thread", worker_threads = 15)]
 async fn main() {
     create_context(
         vec![
@@ -37,6 +40,23 @@ async fn main() {
         "{:?}",
         context.env().get_env_source("EPICS_CA_BEACON_PERIODaaa")
     );
+
+    tokio::spawn(async move {
+        let mut interval = time::interval(Duration::from_secs(1));
+
+        loop {
+            interval.tick().await;
+
+            // periodic work here
+            let mut count= 0;
+            for channel in get_context().channels().not_searching_by_cid().values() {
+                if channel.monitor().state() == MonitorState::Running {
+                    count += 1;
+                }
+            }
+            println!("count {}, not_searching count {}", count, get_context().channels().not_searching_by_cid().len());
+        }
+    });
 
     // let data = Arc::new(RwLock::new(0.0));
     // let data_for_callback = Arc::clone(&data);

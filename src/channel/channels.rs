@@ -27,36 +27,47 @@ pub struct ChannelIo {
 }
 
 pub struct Channels {
-    by_name: RwLock<HashMap<String, Arc<Channel>>>,
-    by_cid: RwLock<HashMap<u32, Arc<Channel>>>,
+    searching_by_name: RwLock<HashMap<String, Arc<Channel>>>,
+    searching_by_cid: RwLock<HashMap<u32, Arc<Channel>>>,
+    not_searching_by_name: RwLock<HashMap<String, Arc<Channel>>>,
+    not_searching_by_cid: RwLock<HashMap<u32, Arc<Channel>>>,
     next_cid: AtomicU32,
     next_ioid: AtomicU32, // read and write
     searching_ca: AtomicBool,
     ios: RwLock<HashMap<u32, ChannelIo>>,
+    pub resolved_count: AtomicU32,
 }
 
 impl Channels {
     pub fn new() -> Self {
         Self {
-            by_name: RwLock::new(HashMap::new()),
-            by_cid: RwLock::new(HashMap::new()),
+            searching_by_name: RwLock::new(HashMap::new()),
+            searching_by_cid: RwLock::new(HashMap::new()),
+            not_searching_by_name: RwLock::new(HashMap::new()),
+            not_searching_by_cid: RwLock::new(HashMap::new()),
             next_cid: AtomicU32::new(1),
             next_ioid: AtomicU32::new(0),
             searching_ca: AtomicBool::new(false),
             ios: RwLock::new(HashMap::new()),
+            resolved_count: AtomicU32::new(0),
         }
     }
 
     pub fn create_channel(self: &Self, name: &str) -> Arc<Channel> {
-        let mut by_name = self.by_name_mut();
-        if let Some(channel) = by_name.get(name) {
-            warn!("Channel {name} is already created");
-            return Arc::clone(channel);
-        }
+        let channel = self.channel_by_name(name);
+
+        match channel {
+            Some(channel) => {
+                warn!("Channel {name} is already created");
+                return channel;
+            }
+            None => {}
+        };
 
         let id = self.next_cid();
         let channel = Arc::new(Channel::new(name, id));
-        let mut by_cid = self.by_cid_mut();
+        let mut by_cid = self.searching_by_cid_mut();
+        let mut by_name = self.searching_by_name_mut();
         by_name.insert(String::from(name), Arc::clone(&channel));
         by_cid.insert(id, Arc::clone(&channel));
         debug!("Channel {name} created with id {id}");
@@ -86,7 +97,11 @@ impl Channels {
     }
 
     pub async fn destroy_channels(self: &Self) {
-        let channels: Vec<Arc<Channel>> = self.by_cid().values().cloned().collect();
+        let channels: Vec<Arc<Channel>> = self.searching_by_cid().values().cloned().collect();
+        for channel in channels {
+            channel.destroy().await;
+        }
+        let channels: Vec<Arc<Channel>> = self.not_searching_by_cid().values().cloned().collect();
         for channel in channels {
             channel.destroy().await;
         }
@@ -152,38 +167,166 @@ impl Channels {
 
     // -------------- channels -----------------
 
-    pub fn by_name(self: &Self) -> RwLockReadGuard<'_, HashMap<String, Arc<Channel>>> {
-        self.by_name.read().unwrap()
+    pub fn searching_by_name(self: &Self) -> RwLockReadGuard<'_, HashMap<String, Arc<Channel>>> {
+        self.searching_by_name.read().unwrap()
     }
 
-    pub fn by_cid(self: &Self) -> RwLockReadGuard<'_, HashMap<u32, Arc<Channel>>> {
-        self.by_cid.read().unwrap()
+    pub fn searching_by_cid(self: &Self) -> RwLockReadGuard<'_, HashMap<u32, Arc<Channel>>> {
+        self.searching_by_cid.read().unwrap()
     }
 
-    pub fn by_name_mut(self: &Self) -> RwLockWriteGuard<'_, HashMap<String, Arc<Channel>>> {
-        self.by_name.write().unwrap()
+    pub fn searching_by_name_mut(
+        self: &Self,
+    ) -> RwLockWriteGuard<'_, HashMap<String, Arc<Channel>>> {
+        self.searching_by_name.write().unwrap()
     }
 
-    pub fn by_cid_mut(self: &Self) -> RwLockWriteGuard<'_, HashMap<u32, Arc<Channel>>> {
-        self.by_cid.write().unwrap()
+    pub fn searching_by_cid_mut(self: &Self) -> RwLockWriteGuard<'_, HashMap<u32, Arc<Channel>>> {
+        self.searching_by_cid.write().unwrap()
     }
 
-    pub fn remove_by_cid_channel(self: &Self, cid: u32) {
-        self.by_cid_mut().remove(&cid);
+    pub fn not_searching_by_name(
+        self: &Self,
+    ) -> RwLockReadGuard<'_, HashMap<String, Arc<Channel>>> {
+        self.not_searching_by_name.read().unwrap()
     }
 
-    pub fn remove_by_name_channel(self: &Self, name: String) {
-        self.by_name_mut().remove(&name);
+    pub fn not_searching_by_cid(self: &Self) -> RwLockReadGuard<'_, HashMap<u32, Arc<Channel>>> {
+        self.not_searching_by_cid.read().unwrap()
+    }
+
+    pub fn not_searching_by_name_mut(
+        self: &Self,
+    ) -> RwLockWriteGuard<'_, HashMap<String, Arc<Channel>>> {
+        self.not_searching_by_name.write().unwrap()
+    }
+
+    pub fn not_searching_by_cid_mut(
+        self: &Self,
+    ) -> RwLockWriteGuard<'_, HashMap<u32, Arc<Channel>>> {
+        self.not_searching_by_cid.write().unwrap()
     }
 
     pub fn channel_by_cid(self: &Self, cid: u32) -> Option<Arc<Channel>> {
-        let by_cid = self.by_cid();
-        by_cid.get(&cid).cloned()
+        let channel = self.searching_channel_by_cid(cid);
+        match channel {
+            Some(channel) => return Some(channel),
+            None => {
+                let channel = self.not_searching_channel_by_cid(cid);
+                match channel {
+                    Some(channel) => {
+                        return Some(channel);
+                    }
+                    None => return None,
+                }
+            }
+        }
     }
 
     pub fn channel_by_name(self: &Self, name: &str) -> Option<Arc<Channel>> {
-        let by_name = self.by_name();
+        let channel = self.searching_channel_by_name(name);
+        match channel {
+            Some(channel) => return Some(channel),
+            None => {
+                let channel = self.not_searching_channel_by_name(name);
+                match channel {
+                    Some(channel) => {
+                        return Some(channel);
+                    }
+                    None => return None,
+                }
+            }
+        }
+    }
+
+    pub fn remove_by_cid(self: &Self, cid: u32) {
+        let channel = self.searching_by_cid_mut().remove(&cid);
+        match channel {
+            Some(channel) => {
+                let name = channel.name();
+                self.searching_by_name_mut().remove(name);
+            }
+            None => {}
+        }
+
+        let channel = self.not_searching_by_cid_mut().remove(&cid);
+        match channel {
+            Some(channel) => {
+                let name = channel.name();
+                self.not_searching_by_name_mut().remove(name);
+            }
+            None => {}
+        }
+    }
+
+    pub fn remove_by_name(self: &Self, name: &str) {
+        let channel = self.searching_by_name_mut().remove(name);
+        match channel {
+            Some(channel) => {
+                let cid = channel.cid();
+                self.searching_by_cid_mut().remove(&cid);
+            }
+            None => {}
+        }
+
+        let channel = self.not_searching_by_name_mut().remove(name);
+        match channel {
+            Some(channel) => {
+                let cid = channel.cid();
+                self.not_searching_by_cid_mut().remove(&cid);
+            }
+            None => {}
+        }
+    }
+
+    pub fn searching_channel_by_cid(self: &Self, cid: u32) -> Option<Arc<Channel>> {
+        let by_cid = self.searching_by_cid();
+        by_cid.get(&cid).cloned()
+    }
+
+    pub fn not_searching_channel_by_cid(self: &Self, cid: u32) -> Option<Arc<Channel>> {
+        let by_cid = self.not_searching_by_cid();
+        by_cid.get(&cid).cloned()
+    }
+
+    pub fn searching_channel_by_name(self: &Self, name: &str) -> Option<Arc<Channel>> {
+        let by_name = self.searching_by_name();
         by_name.get(name).cloned()
+    }
+
+    pub fn not_searching_channel_by_name(self: &Self, name: &str) -> Option<Arc<Channel>> {
+        let by_name = self.not_searching_by_name();
+        by_name.get(name).cloned()
+    }
+
+    pub fn move_to_searching_by_cid(self: &Self, cid: u32) {
+        let channel = self.not_searching_channel_by_cid(cid);
+        match channel {
+            Some(channel) => {
+                self.remove_by_cid(cid);
+                let channel1 = Arc::clone(&channel);
+                self.searching_by_cid_mut().insert(cid, channel);
+                let name = channel1.name();
+                self.searching_by_name_mut()
+                    .insert(name.to_string(), channel1);
+            }
+            None => {}
+        }
+    }
+
+    pub fn move_to_not_searching_by_cid(self: &Self, cid: u32) {
+        let channel = self.searching_channel_by_cid(cid);
+        match channel {
+            Some(channel) => {
+                self.remove_by_cid(cid);
+                let channel1 = Arc::clone(&channel);
+                self.not_searching_by_cid_mut().insert(cid, channel);
+                let name = channel1.name();
+                self.not_searching_by_name_mut()
+                    .insert(name.to_string(), channel1);
+            }
+            None => {}
+        }
     }
 
     pub fn next_cid(self: &Self) -> u32 {
@@ -226,15 +369,16 @@ impl Channels {
      * send out name search packets for all unconnected channels
      */
     async fn search_ca(self: &Self) {
-        let channels: Vec<Arc<Channel>> = self.by_cid().values().cloned().collect();
         let context = get_context();
         let udp = context.udp();
 
-        let mut msgs: Vec<CaMsg> = vec![];
-        msgs.push(CaMsg::build_version(udp.ca_addr_list()));
-        let mut buf_len: u32 = 16;
+        let mut msgs = vec![];
+        let mut msgs_size: u32 = 0;
 
-        let mut never_connected_counter = 0;
+        let version_msg = CaMsg::build_version(udp.ca_addr_list());
+        msgs_size = version_msg.size();
+        msgs.push(version_msg);
+
         let mut name_searching_counter = 0;
         let mut name_found_counter = 0;
         let mut tcp_connected_counter = 0;
@@ -244,13 +388,21 @@ impl Channels {
         let mut monitor_starting_counter = 0;
         let mut monitor_running_counter = 0;
 
-        for channel in channels {
+        let mut version_count = 0;
+
+        for channel in self.searching_by_cid().values() {
             let name = channel.name();
             let cid = channel.cid();
             let channel_state = channel.state();
+            if channel_state != ChannelState::NameSearching {
+                debug!(
+                    "Channel {name} is already found ({:?}), skip name search",
+                    channel_state
+                );
+                continue;
+            }
 
             match channel_state {
-                ChannelState::NeverConnected => never_connected_counter += 1,
                 ChannelState::NameSearching => name_searching_counter += 1,
                 ChannelState::NameFound => name_found_counter += 1,
                 ChannelState::TcpConnected => tcp_connected_counter += 1,
@@ -265,51 +417,61 @@ impl Channels {
                 MonitorState::Running => monitor_running_counter += 1,
             }
 
-            if channel_state != ChannelState::NeverConnected
-                && channel_state != ChannelState::NameSearching
-            {
-                debug!(
-                    "Channel {name} is already found ({:?}), skip name search",
-                    channel_state
-                );
-                continue;
-            }
-
-            let search_counter = channel.search_counter();
-            channel.increment_search_counter();
-            if !search_counter.is_power_of_two() {
-                debug!("Skip this search for {name} as search counter = {search_counter}");
-                continue;
-            }
-            debug!("Searching {name}");
-            let msg = CaMsg::build_name_search(name, cid, udp.ca_addr_list());
-
             channel.set_state(ChannelState::NameSearching, true);
 
-            if buf_len + msg.size() as u32 > MAX_UDP_SEND as u32 {
-                udp.send_msgs(&msgs).await;
-                msgs.clear();
-                msgs.push(CaMsg::build_version(udp.ca_addr_list()));
-                buf_len = 16;
+            let search_counter = channel.search_counter();
+            if !search_counter.is_power_of_two() {
+                channel.increment_search_counter();
+                debug!("Skip this search for {name} as search counter = {search_counter}");
+                continue;
+            } else {
+                channel.increment_search_counter();
             }
-            buf_len = buf_len + msg.size();
-            msgs.push(msg);
-        }
-        if msgs.len() > 1 {
-            udp.send_msgs(&msgs).await;
-        }
 
-        if monitor_running_counter == created_counter {
-            println!("{}", context.tcps().tcps().len());
-            println!(
-                "======================================, {}, {}, {}, {}",
-                monitor_running_counter, name_found_counter, tcp_connected_counter, created_counter
-            );
+            let name_search_msg = CaMsg::build_name_search(name, cid, udp.ca_addr_list());
+
+            if msgs_size + name_search_msg.size() > MAX_UDP_SEND as u32 {
+                // patch with one or few CA_PROTO_VERSION messages
+                loop {
+                    let version_msg = CaMsg::build_version(udp.ca_addr_list());
+                    if msgs_size + version_msg.size() > MAX_UDP_SEND as u32 {
+                        break;
+                    }
+                    msgs_size += version_msg.size();
+                    msgs.push(version_msg);
+                }
+                let version_msg = CaMsg::build_version(udp.ca_addr_list());
+                msgs_size = version_msg.size();
+                msgs.push(version_msg);
+                version_count += 1;
+            }
+
+            msgs_size = msgs_size + name_search_msg.size();
+            // msgs.push(CaMsg::build_version(udp.ca_addr_list()));
+            msgs.push(name_search_msg);
         }
 
         // println!(
-        //     "channel states: never_connected={never_connected_counter}, name_searching={name_searching_counter}, name_found={name_found_counter}, tcp_connected={tcp_connected_counter}, created={created_counter}, destroyed={destroyed_counter}"
+        //     "channel states: name_searching={name_searching_counter}, name_found={name_found_counter}, tcp_connected={tcp_connected_counter}, created={created_counter}, destroyed={destroyed_counter}"
         // );
+        // println!(
+        //     "msgs len {}, version count {}, searing channels: {}, not-searching channels: {}",
+        //     msgs.len(),
+        //     version_count,
+        //     self.searching_by_cid().len(),
+        //     self.not_searching_by_cid().len()
+        // );
+        // if monitor_running_counter == created_counter {
+        //     println!("{}", context.tcps().tcps().len());
+        //     println!(
+        //         "======================================, {}, {}, {}, {}",
+        //         monitor_running_counter, name_found_counter, tcp_connected_counter, created_counter
+        //     );
+        // }
+        if msgs.len() > 1 {
+            udp.send_msgs(&msgs).await;
+        } else {
+        }
     }
 }
 
@@ -322,7 +484,8 @@ impl fmt::Display for Channels {
             .collect();
         ios.sort_by_key(|(ioid, _)| *ioid);
 
-        let mut channels: Vec<Arc<Channel>> = self.by_cid().values().cloned().collect();
+        let mut channels: Vec<Arc<Channel>> = self.searching_by_cid().values().cloned().collect();
+        channels.extend(self.not_searching_by_cid().values().cloned());
         channels.sort_by_key(|channel| channel.cid());
 
         writeln!(f, "Channels {{")?;

@@ -258,7 +258,7 @@ impl Env {
         );
         self.set(
             "EPICS_CA_MIN_SEARCH_PERIOD",
-            EnvType::Double(0.1),
+            EnvType::Double(0.05),
             EnvSource::Default,
         );
         self.set(
