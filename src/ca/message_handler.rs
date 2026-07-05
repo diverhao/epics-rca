@@ -127,22 +127,22 @@ pub fn handle_ca_proto_search(msg: CaMsg) {
 
     // connect TCP (if not connected yet), and send handshake packets
     let server_addr = SocketAddr::new(src.ip(), server_port);
-    if let Some(tcp) = context.tcps().tcp(&server_addr) {
-        // channel.connect_with_existing_tcp(tcp, server_addr);
-        channel.set_state(ChannelState::TcpConnected, true);
-        // add this channel to TCP
-        let cid = channel.cid();
-        tcp.add_cid(cid);
-        // assign TCP to this channel
-        channel.set_addr(Some(server_addr));
-        // send handshake messages
-        channel.send_connect_chan();
-        return;
-    } else {
-        tokio::spawn(async move {
-            channel.connect(server_addr).await;
-        });
-    }
+    // if let Some(tcp) = context.tcps().tcp(&server_addr) {
+    //     // channel.connect_with_existing_tcp(tcp, server_addr);
+    //     channel.set_state(ChannelState::TcpConnected, true);
+    //     // add this channel to TCP
+    //     let cid = channel.cid();
+    //     tcp.add_cid(cid);
+    //     // assign TCP to this channel
+    //     channel.set_addr(Some(server_addr));
+    //     // send handshake messages
+    //     channel.send_connect_chan();
+    //     return;
+    // } else {
+    tokio::spawn(async move {
+        channel.connect(server_addr).await;
+    });
+    // }
 }
 
 fn handle_ca_proto_access_rights(msg: CaMsg) {
@@ -251,6 +251,23 @@ fn handle_ca_proto_event_add(msg: CaMsg) {
 
     // update the monitor state each time
     if channel.monitor_state() == MonitorState::Starting {
+        get_context()
+            .tcps()
+            .running_monitor_count
+            .fetch_add(1, Ordering::Relaxed);
+        if get_context()
+            .tcps()
+            .running_monitor_count
+            .load(Ordering::Relaxed)
+            == 100000
+        {
+            println!("OKOKOK");
+            let start = get_context().tcps().start;
+            let elapsed = start.elapsed();
+
+            println!("elapsed: {:?}", elapsed);
+            println!("seconds: {:.3}", elapsed.as_secs_f64());
+        }
         channel.set_monitor_state(MonitorState::Running);
         channel.set_monitor_data_count(data_count);
         channel.set_monitor_data_type(dbr_type);

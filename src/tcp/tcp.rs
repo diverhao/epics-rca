@@ -9,6 +9,8 @@ use std::collections::HashSet;
 use std::collections::VecDeque;
 use std::collections::vec_deque;
 use std::hash::Hash;
+use std::sync::atomic::AtomicU32;
+use std::time::Instant;
 use std::{
     net::SocketAddr,
     sync::{
@@ -58,7 +60,7 @@ impl TCP {
                     break;
                 }
                 // wait 5 ms
-                tokio::time::sleep(Duration::from_millis(50)).await;
+                tokio::time::sleep(Duration::from_millis(5)).await;
                 tcp.send_queue_msg().await;
             }
         });
@@ -168,7 +170,8 @@ impl TCP {
                         debug!("Received {size} TCP bytes from {}", tcp.addr());
                         buf.extend_from_slice(&buf_pending[..size]);
 
-                        let msgs = CaMsg::from_buf(&mut buf, Some(tcp.addr().clone()), vec![], true);
+                        let msgs =
+                            CaMsg::from_buf(&mut buf, Some(tcp.addr().clone()), vec![], true);
                         let src = *tcp.addr();
                         handle_tcp_msgs(&src, msgs);
                     }
@@ -214,7 +217,8 @@ impl TCP {
         let mut buf: Vec<u8> = vec![];
         let msgs = {
             let mut queue = self.queue_msg_send_mut();
-            let n = queue.len().min(4096);
+            let n = queue.len().min(100000);
+
             // println!("Sending {} tcp messages", n);
             queue.drain(..n).collect::<Vec<_>>()
         };
@@ -457,6 +461,11 @@ pub struct TCPs {
     // the vector
     tcps: RwLock<Vec<Arc<TCP>>>,
     connecting_tcps: RwLock<Vec<Arc<TCP>>>,
+    pub wait_connected_count: AtomicU32,
+    pub already_connected_count: AtomicU32,
+    pub self_connect_count: AtomicU32,
+    pub running_monitor_count: AtomicU32,
+    pub start: std::time::Instant,
 }
 
 impl TCPs {
@@ -464,6 +473,11 @@ impl TCPs {
         TCPs {
             tcps: RwLock::new(vec![]),
             connecting_tcps: RwLock::new(vec![]),
+            wait_connected_count: AtomicU32::new(0),
+            already_connected_count: AtomicU32::new(0),
+            self_connect_count: AtomicU32::new(0),
+            running_monitor_count: AtomicU32::new(0),
+            start: Instant::now(),
         }
     }
 
@@ -513,15 +527,6 @@ impl TCPs {
         None
     }
 
-    // pub fn find_connected_tcp(self: &Self, addr: &SocketAddr) -> Option<Arc<TCP>> {
-    //     for tcp in self.tcps().iter() {
-    //         if *tcp.addr() == *addr && tcp.is_connected() {
-    //             return Some(tcp.clone());
-    //         }
-    //     }
-    //     return None;
-    // }
-
     /**
      * Returns Ok<Arc<TCP>> if creation is successful.
      *
@@ -532,15 +537,18 @@ impl TCPs {
             && tcp.is_connected()
         {
             // this tcp already exists
+            self.already_connected_count.fetch_add(1, Ordering::Relaxed);
             debug!("TCP {addr} already exists");
             return Ok(tcp);
         } else {
             if let Some(tcp) = self.connecting_tcp(&addr) {
                 //todo: wait for notifier to notify, the notifier should be in TCP
+                self.wait_connected_count.fetch_add(1, Ordering::Relaxed);
                 tcp.wait_connected().await?;
+                // self.wait_connected_count.fetch_sub(1, Ordering::Relaxed);
                 return Ok(tcp);
             }
-
+            self.self_connect_count.fetch_add(1, Ordering::Relaxed);
             // tcp may take long while to create
             let id = rand::random::<u32>();
             let id1 = id;
@@ -565,40 +573,11 @@ impl TCPs {
                 // let tcp: Result<TCP, String> = TCP::new(addr).await;
                 let ip = addr.ip();
                 let port = addr.port();
-                // check if TCPs has one such TCP, if a tcp exists and already connected
-                // just return it, otherwise start to connect this TCP
-                // if let Some(another_tcp) = self.tcp(&addr) {
-                //     return Ok((another_tcp, false));
-                // }
-
                 let stream = TcpStream::connect(addr).await;
-                // if let Some(another_tcp) = self.tcp(&addr) {
-                //     return Ok((another_tcp, false));
-                // }
-
                 if let Ok(stream) = stream {
                     let (reader, writer) = stream.into_split();
                     tcp.set_reader(reader).await;
                     tcp.set_writer(writer).await;
-                    // if let Some(another_tcp) = self.tcp(&addr) {
-                    //     {
-                    //         let mut reader = tcp.reader().await;
-                    //         reader.take();
-                    //     }
-
-                    //     let writer = {
-                    //         let mut writer = tcp.writer().await;
-                    //         writer.take()
-                    //     };
-
-                    //     if let Some(mut writer) = writer {
-                    //         let _ =
-                    //             tokio::time::timeout(Duration::from_millis(100), writer.shutdown())
-                    //                 .await;
-                    //     }
-                    //     return Ok((another_tcp, false));
-                    // }
-                    // tcp.set_connected(true);
                     Ok(tcp)
                 } else {
                     Err(String::from(
@@ -640,7 +619,7 @@ impl TCPs {
                     };
 
                     // async work is done
-                    // todo: notify waiters to go
+                    // todo: notify waiters to go, which is in this function
                     tcp.connect_notify.notify_waiters();
                     return Ok(tcp);
                 }

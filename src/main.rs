@@ -8,6 +8,7 @@ mod tcp;
 mod udp;
 
 use crate::channel::channel::Channel;
+use crate::channel::dbr::ChannelState;
 use crate::channel::dbr::DbrValue;
 use crate::channel::monitor::MonitorDataType;
 use crate::channel::monitor::MonitorState;
@@ -16,9 +17,10 @@ use crate::context::context::get_context;
 use ::log::LevelFilter;
 use ::log::debug;
 use std::fmt::format;
+use std::sync::atomic::Ordering;
 use std::sync::{Arc, RwLock, RwLockReadGuard, RwLockWriteGuard};
-use tokio::time::{Duration, sleep};
 use tokio::time::{self};
+use tokio::time::{Duration, sleep};
 
 #[tokio::main(flavor = "current_thread")]
 // #[tokio::main(flavor = "multi_thread", worker_threads = 15)]
@@ -41,22 +43,39 @@ async fn main() {
         context.env().get_env_source("EPICS_CA_BEACON_PERIODaaa")
     );
 
-    tokio::spawn(async move {
-        let mut interval = time::interval(Duration::from_secs(1));
+    // tokio::spawn(async move {
+    //     let mut interval = time::interval(Duration::from_millis(1000));
 
-        loop {
-            interval.tick().await;
+    //     loop {
+    //         interval.tick().await;
 
-            // periodic work here
-            let mut count= 0;
-            for channel in get_context().channels().not_searching_by_cid().values() {
-                if channel.monitor().state() == MonitorState::Running {
-                    count += 1;
-                }
-            }
-            println!("count {}, not_searching count {}", count, get_context().channels().not_searching_by_cid().len());
-        }
-    });
+    //         // periodic work here
+    //         let mut monitor_running_count = 0;
+    //         let mut name_found_count = 0;
+    //         let mut tcp_connected_count = 0;
+    //         let mut created_count = 0;
+    //         let mut waiting_on_tcp_channels = 0;
+    //         for channel in get_context().channels().not_searching_by_cid().values() {
+    //             match channel.state() {
+    //                 ChannelState::NameFound => name_found_count += 1,
+    //                 ChannelState::TcpConnected => tcp_connected_count += 1,
+    //                 ChannelState::Created => created_count += 1,
+    //                 _ => {}
+    //             }
+    //             if channel.monitor().state() == MonitorState::Running {
+    //                 monitor_running_count += 1;
+    //             }
+    //         }
+    //         println!(
+    //             "not sesarching {}, monitor running {}, name found  {}, tcp connected {}, created {}, waiting on tcp {}, no wait on tcp {}, self connect {}",
+    //             get_context().channels().not_searching_by_cid().len(),
+    //             monitor_running_count, name_found_count, tcp_connected_count, created_count,
+    //             get_context().tcps().wait_connected_count.load(Ordering::Relaxed),
+    //             get_context().tcps().already_connected_count.load(Ordering::Relaxed),
+    //             get_context().tcps().self_connect_count.load(Ordering::Relaxed)
+    //         );
+    //     }
+    // });
 
     // let data = Arc::new(RwLock::new(0.0));
     // let data_for_callback = Arc::clone(&data);
