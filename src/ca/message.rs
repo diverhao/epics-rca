@@ -124,7 +124,7 @@ impl CaMsg {
         buf: &mut Vec<u8>,
         src: Option<SocketAddr>,
         dest: Vec<SocketAddr>,
-        is_tcp: bool
+        is_tcp: bool,
     ) -> Vec<CaMsg> {
         let mut msgs: Vec<CaMsg> = vec![];
         loop {

@@ -139,9 +139,9 @@ pub fn handle_ca_proto_search(msg: CaMsg) {
         channel.send_connect_chan();
         return;
     } else {
-    tokio::spawn(async move {
-        channel.connect(server_addr).await;
-    });
+        tokio::spawn(async move {
+            channel.connect(server_addr).await;
+        });
     }
 }
 

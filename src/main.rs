@@ -69,10 +69,22 @@ async fn main() {
             println!(
                 "not sesarching {}, monitor running {}, name found  {}, tcp connected {}, created {}, waiting on tcp {}, no wait on tcp {}, self connect {}",
                 get_context().channels().not_searching_by_cid().len(),
-                monitor_running_count, name_found_count, tcp_connected_count, created_count,
-                get_context().tcps().wait_connected_count.load(Ordering::Relaxed),
-                get_context().tcps().already_connected_count.load(Ordering::Relaxed),
-                get_context().tcps().self_connect_count.load(Ordering::Relaxed)
+                monitor_running_count,
+                name_found_count,
+                tcp_connected_count,
+                created_count,
+                get_context()
+                    .tcps()
+                    .wait_connected_count
+                    .load(Ordering::Relaxed),
+                get_context()
+                    .tcps()
+                    .already_connected_count
+                    .load(Ordering::Relaxed),
+                get_context()
+                    .tcps()
+                    .self_connect_count
+                    .load(Ordering::Relaxed)
             );
         }
     });

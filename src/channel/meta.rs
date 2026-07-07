@@ -375,16 +375,14 @@ impl Channel {
             && (new_state == ChannelState::Destroyed
                 || new_state == ChannelState::Created
                 || new_state == ChannelState::NameFound
-                || new_state == ChannelState::TcpConnected
-                )
+                || new_state == ChannelState::TcpConnected)
         {
             channels.move_to_not_searching_by_cid(self.cid());
         } else if new_state == ChannelState::NameSearching
             && (old_state == ChannelState::Destroyed
                 || old_state == ChannelState::Created
                 || old_state == ChannelState::NameFound
-                || old_state == ChannelState::TcpConnected
-                )
+                || old_state == ChannelState::TcpConnected)
         {
             channels.move_to_searching_by_cid(self.cid());
         } else {
@@ -411,7 +409,8 @@ impl Channel {
     }
 
     pub fn set_seconds_since_epoch(&self, new_seconds_since_epoch: i32) {
-        self.meta_mut().set_seconds_since_epoch(new_seconds_since_epoch);
+        self.meta_mut()
+            .set_seconds_since_epoch(new_seconds_since_epoch);
     }
 
     pub fn set_nano_seconds(&self, new_nano_seconds: u32) {
@@ -444,11 +443,13 @@ impl Channel {
     }
 
     pub fn set_upper_display_limit(&self, new_upper_display_limit: i16) {
-        self.meta_mut().set_upper_display_limit(new_upper_display_limit);
+        self.meta_mut()
+            .set_upper_display_limit(new_upper_display_limit);
     }
 
     pub fn set_lower_display_limit(&self, new_lower_display_limit: i16) {
-        self.meta_mut().set_lower_display_limit(new_lower_display_limit);
+        self.meta_mut()
+            .set_lower_display_limit(new_lower_display_limit);
     }
 
     pub fn set_upper_alarm_limit(&self, new_upper_alarm_limit: i16) {
@@ -460,11 +461,13 @@ impl Channel {
     }
 
     pub fn set_upper_warning_limit(&self, new_upper_warning_limit: i16) {
-        self.meta_mut().set_upper_warning_limit(new_upper_warning_limit);
+        self.meta_mut()
+            .set_upper_warning_limit(new_upper_warning_limit);
     }
 
     pub fn set_lower_warning_limit(&self, new_lower_warning_limit: i16) {
-        self.meta_mut().set_lower_warning_limit(new_lower_warning_limit);
+        self.meta_mut()
+            .set_lower_warning_limit(new_lower_warning_limit);
     }
 
     pub fn set_access_right(self: &Self, access_right: ChannelAccessRights) {
