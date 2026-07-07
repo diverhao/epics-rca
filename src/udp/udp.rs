@@ -8,8 +8,8 @@ use ::log::debug;
 use ::log::error;
 use ::log::info;
 use core::net::SocketAddr;
+use std::char::MAX;
 use std::sync::{Arc, RwLock, RwLockReadGuard, RwLockWriteGuard};
-use std::usize::MAX;
 use tokio::net::UdpSocket;
 
 pub struct UDP {
@@ -65,7 +65,7 @@ impl UDP {
         let udp_v4 = Arc::clone(&self);
         let udp_v6 = Arc::clone(&self);
         tokio::spawn(async move {
-            let mut buf: Vec<u8> = vec![0_u8; 1024*1024];
+            let mut buf: Vec<u8> = vec![0_u8; 16 * MAX_UDP_SEND];
             loop {
                 match socket_v4.recv_from(&mut buf).await {
                     Ok((size, remote_socket)) => {
@@ -80,7 +80,7 @@ impl UDP {
             }
         });
         tokio::spawn(async move {
-            let mut buf = [0_u8; 1024*1024];
+            let mut buf = [0_u8; 16 * MAX_UDP_SEND];
             loop {
                 match socket_v6.recv_from(&mut buf).await {
                     Ok((size, remote_socket)) => {
