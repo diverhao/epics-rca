@@ -24,7 +24,7 @@ pub struct Channel {
     name: String,
     cid: u32,       // client ID
     sid: AtomicU32, // server ID, assigned after channel created on server
-    meta: Arc<Meta>,
+    meta: RwLock<Meta>,
     value: RwLock<Option<DbrValue>>,
     search_counter: AtomicU32,
     addr: RwLock<Option<SocketAddr>>,
@@ -39,7 +39,7 @@ impl Channel {
             cid: cid,
             sid: AtomicU32::new(0),
             search_counter: AtomicU32::new(1),
-            meta: Meta::new(),
+            meta: RwLock::new(Meta::new()),
             value: RwLock::new(None),
             addr: RwLock::new(None),
             state_change_notifier: Notify::new(),
@@ -236,7 +236,7 @@ impl Channel {
     pub fn reset(self: &Self) {
         self.set_sid(0);
         self.set_search_counter(1);
-        self.meta().reset();
+        self.meta_mut().reset();
         self.set_addr(None);
         self.set_value(None);
         self.set_addr(None);
@@ -389,7 +389,7 @@ impl Channel {
     }
 
     pub fn reset_meta(self: &Self) {
-        self.meta().reset();
+        self.meta_mut().reset();
     }
 
     pub fn reset_value(self: &Self) {
@@ -402,8 +402,12 @@ impl Channel {
         &self.name
     }
 
-    pub fn meta(&self) -> Arc<Meta> {
-        self.meta.clone()
+    pub fn meta(&self) -> RwLockReadGuard<'_, Meta> {
+        self.meta.read().unwrap()
+    }
+
+    pub fn meta_mut(&self) -> RwLockWriteGuard<'_, Meta> {
+        self.meta.write().unwrap()
     }
 
     pub fn monitor(self: &Self) -> Arc<Monitor> {
@@ -479,7 +483,7 @@ impl Channel {
 }
 impl std::fmt::Display for Channel {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        let meta = self.meta.as_ref().to_string().replace('\n', "\n    ");
+        let meta = self.meta().to_string().replace('\n', "\n    ");
         let monitor = self.monitor.as_ref().to_string().replace('\n', "\n    ");
 
         writeln!(f, "\nChannel {{")?;
