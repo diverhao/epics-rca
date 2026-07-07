@@ -29,7 +29,7 @@ pub struct Channel {
     search_counter: AtomicU32,
     addr: RwLock<Option<SocketAddr>>,
     state_change_notifier: Notify,
-    monitor: Arc<Monitor>,
+    monitor: RwLock<Monitor>,
 }
 
 impl Channel {
@@ -43,7 +43,7 @@ impl Channel {
             value: RwLock::new(None),
             addr: RwLock::new(None),
             state_change_notifier: Notify::new(),
-            monitor: Monitor::new(),
+            monitor: RwLock::new(Monitor::new()),
         }
     }
 
@@ -410,8 +410,12 @@ impl Channel {
         self.meta.write().unwrap()
     }
 
-    pub fn monitor(self: &Self) -> Arc<Monitor> {
-        self.monitor.clone()
+    pub fn monitor(self: &Self) -> RwLockReadGuard<'_, Monitor> {
+        self.monitor.read().unwrap()
+    }
+
+    pub fn monitor_mut(self: &Self) -> RwLockWriteGuard<'_, Monitor> {
+        self.monitor.write().unwrap()
     }
 
     pub fn value(&self) -> RwLockReadGuard<'_, Option<DbrValue>> {
@@ -484,7 +488,7 @@ impl Channel {
 impl std::fmt::Display for Channel {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         let meta = self.meta().to_string().replace('\n', "\n    ");
-        let monitor = self.monitor.as_ref().to_string().replace('\n', "\n    ");
+        let monitor = self.monitor().to_string().replace('\n', "\n    ");
 
         writeln!(f, "\nChannel {{")?;
         writeln!(f, "    name: {:?},", self.name)?;

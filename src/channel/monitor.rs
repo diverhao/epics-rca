@@ -51,97 +51,101 @@ pub struct MonitorConfig {
 }
 
 pub struct Monitor {
-    pub state: RwLock<MonitorState>,
-    pub data_type: RwLock<DbrType>,
-    pub data_count: AtomicU32,
-    pub callback: RwLock<Option<ChannelCallback>>,
-    pub user_config: RwLock<MonitorConfig>,
+    pub state: MonitorState,
+    pub data_type: DbrType,
+    pub data_count: u32,
+    pub callback: Option<ChannelCallback>,
+    pub user_config: MonitorConfig,
 }
 
 impl Monitor {
-    pub fn new() -> Arc<Monitor> {
-        Arc::new(Monitor {
-            state: RwLock::new(MonitorState::NotRunning),
-            data_type: RwLock::new(DbrType::Double),
-            data_count: AtomicU32::new(0),
-            callback: RwLock::new(None),
-            user_config: RwLock::new(MonitorConfig {
+    pub fn new() -> Monitor {
+        Monitor {
+            state: MonitorState::NotRunning,
+            data_type: DbrType::Double,
+            data_count: 0,
+            callback: None,
+            user_config: MonitorConfig {
                 data_type: None,
                 data_count: None,
-            }),
-        })
+            },
+        }
     }
 
     // ---------------- getters -------------------
 
     pub fn state(self: &Self) -> MonitorState {
-        self.state.read().unwrap().clone()
+        self.state
     }
 
     pub fn callback(self: &Self) -> Option<ChannelCallback> {
-        self.callback.read().unwrap().clone()
+        self.callback.clone()
     }
 
     pub fn data_count(self: &Self) -> u32 {
-        self.data_count.load(Ordering::Relaxed)
+        self.data_count
     }
 
     pub fn data_type(self: &Self) -> DbrType {
-        self.data_type.read().unwrap().clone()
+        self.data_type
     }
 
     // ---------------- setters ------------------
 
-    pub fn set_callback(self: &Self, callback: Option<ChannelCallback>) {
-        *self.callback.write().unwrap() = callback;
+    pub fn set_callback(self: &mut Self, callback: Option<ChannelCallback>) {
+        self.callback = callback;
     }
 
-    pub fn set_data_count(self: &Self, count: u32) {
-        self.data_count.store(count, Ordering::Relaxed);
+    pub fn set_data_count(self: &mut Self, count: u32) {
+        self.data_count = count;
     }
 
-    pub fn set_data_type(self: &Self, data_type: DbrType) {
-        *self.data_type.write().unwrap() = data_type;
+    pub fn set_data_type(self: &mut Self, data_type: DbrType) {
+        self.data_type = data_type;
     }
 
-    pub fn set_state(self: &Self, state: MonitorState) {
-        *self.state.write().unwrap() = state;
+    pub fn set_state(self: &mut Self, state: MonitorState) {
+        self.state = state;
     }
 
     // ------------ user config ----------------
 
+    pub fn user_config(self: &Self) -> &MonitorConfig {
+        &self.user_config
+    }
+    pub fn user_config_mut(self: &mut Self) -> &mut MonitorConfig {
+        &mut self.user_config
+    }
+
     pub fn user_config_data_count(self: &Self) -> Option<u32> {
-        self.user_config.read().unwrap().data_count
+        self.user_config.data_count
     }
 
     pub fn user_config_data_type(self: &Self) -> Option<MonitorDataType> {
-        self.user_config.read().unwrap().data_type
+        self.user_config.data_type
     }
 
-    pub fn set_user_config_data_count(self: &Self, data_count: Option<u32>) {
-        self.user_config.write().unwrap().data_count = data_count;
+    pub fn set_user_config_data_count(self: &mut Self, data_count: Option<u32>) {
+        self.user_config_mut().data_count = data_count;
     }
 
-    pub fn set_user_config_data_type(self: &Self, data_type: Option<MonitorDataType>) {
-        self.user_config.write().unwrap().data_type = data_type;
+    pub fn set_user_config_data_type(self: &mut Self, data_type: Option<MonitorDataType>) {
+        self.user_config_mut().data_type = data_type;
     }
 }
 
 impl std::fmt::Display for Monitor {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        let state = *self.state.read().unwrap();
-        let data_type = *self.data_type.read().unwrap();
-        let data_count = self.data_count.load(Ordering::Relaxed);
-        let callback = if self.callback.read().unwrap().is_some() {
+        let callback = if self.callback.is_some() {
             "Some"
         } else {
             "None"
         };
 
         writeln!(f, "Monitor {{")?;
-        writeln!(f, "    state: {:?},", state)?;
-        writeln!(f, "    data_type: {:?},", data_type)?;
-        writeln!(f, "    data_count: {},", data_count)?;
+        writeln!(f, "    state: {:?},", self.state)?;
+        writeln!(f, "    data_type: {:?},", self.data_type)?;
+        writeln!(f, "    data_count: {},", self.data_count)?;
         writeln!(f, "    callback: {}", callback)?;
         write!(f, "}}")
     }
@@ -175,8 +179,8 @@ impl Channel {
         }
 
         // store user-defined
-        self.monitor().set_user_config_data_count(data_count);
-        self.monitor().set_user_config_data_type(data_type);
+        self.monitor_mut().set_user_config_data_count(data_count);
+        self.monitor_mut().set_user_config_data_type(data_type);
 
         let callback = match callback {
             Some(callback) => Some(callback),
@@ -214,17 +218,25 @@ impl Channel {
             return;
         }
 
-        // pull user-defined parameter
-        if let Some(user_config_data_count) = self.monitor().user_config_data_count() {
-            self.monitor().set_data_count(user_config_data_count);
-        } else {
-            self.monitor().set_data_count(self.data_count_native());
-        }
-        if let Some(user_config_data_type) = self.monitor().user_config_data_type() {
-            self.monitor()
-                .set_data_type(user_config_data_type.resolve(self));
-        } else {
-            self.monitor().set_data_type(self.dbr_type_native());
+        // Snapshot user config before taking a write lock. Holding the read guard
+        // from self.monitor() across self.monitor_mut() can deadlock.
+        let (user_config_data_count, user_config_data_type) = {
+            let monitor = self.monitor();
+            (
+                monitor.user_config_data_count(),
+                monitor.user_config_data_type(),
+            )
+        };
+
+        let data_count = user_config_data_count.unwrap_or_else(|| self.data_count_native());
+        let data_type = user_config_data_type
+            .map(|data_type| data_type.resolve(self))
+            .unwrap_or_else(|| self.dbr_type_native());
+
+        {
+            let mut monitor = self.monitor_mut();
+            monitor.set_data_count(data_count);
+            monitor.set_data_type(data_type);
         }
 
         let dbr_type = self.monitor().data_type();
@@ -266,7 +278,7 @@ impl Channel {
             return;
         }
 
-        self.monitor().set_state(MonitorState::NotRunning);
+        self.monitor_mut().set_state(MonitorState::NotRunning);
 
         let dbr_type = self.monitor_data_type();
         let data_count = self.monitor_data_count();
@@ -313,18 +325,18 @@ impl Channel {
     // ------------- setters ------------------
 
     pub fn set_monitor_callback(self: &Self, callback: Option<ChannelCallback>) {
-        self.monitor().set_callback(callback);
+        self.monitor_mut().set_callback(callback);
     }
 
     pub fn set_monitor_data_count(self: &Self, count: u32) {
-        self.monitor().set_data_count(count)
+        self.monitor_mut().set_data_count(count)
     }
 
     pub fn set_monitor_data_type(self: &Self, data_type: DbrType) {
-        self.monitor().set_data_type(data_type);
+        self.monitor_mut().set_data_type(data_type);
     }
 
     pub fn set_monitor_state(self: &Self, state: MonitorState) {
-        self.monitor().set_state(state);
+        self.monitor_mut().set_state(state);
     }
 }
