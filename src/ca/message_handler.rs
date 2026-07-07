@@ -127,22 +127,22 @@ pub fn handle_ca_proto_search(msg: CaMsg) {
 
     // connect TCP (if not connected yet), and send handshake packets
     let server_addr = SocketAddr::new(src.ip(), server_port);
-    // if let Some(tcp) = context.tcps().tcp(&server_addr) {
-    //     // channel.connect_with_existing_tcp(tcp, server_addr);
-    //     channel.set_state(ChannelState::TcpConnected, true);
-    //     // add this channel to TCP
-    //     let cid = channel.cid();
-    //     tcp.add_cid(cid);
-    //     // assign TCP to this channel
-    //     channel.set_addr(Some(server_addr));
-    //     // send handshake messages
-    //     channel.send_connect_chan();
-    //     return;
-    // } else {
+    if let Some(tcp) = context.tcps().tcp(&server_addr) {
+        // channel.connect_with_existing_tcp(tcp, server_addr);
+        channel.set_state(ChannelState::TcpConnected, true);
+        // add this channel to TCP
+        let cid = channel.cid();
+        tcp.add_cid(cid);
+        // assign TCP to this channel
+        channel.set_addr(Some(server_addr));
+        // send handshake messages
+        channel.send_connect_chan();
+        return;
+    } else {
     tokio::spawn(async move {
         channel.connect(server_addr).await;
     });
-    // }
+    }
 }
 
 fn handle_ca_proto_access_rights(msg: CaMsg) {

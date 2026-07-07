@@ -372,12 +372,16 @@ impl Channels {
         let context = get_context();
         let udp = context.udp();
 
-        let mut msgs = vec![];
+        let mut buf: Vec<Vec<u8>> = vec![];
+        let mut buf_packet: Vec<u8> = vec![];
+
+        // let mut msgs = vec![];
         let mut msgs_size: u32 = 0;
 
-        let version_msg = CaMsg::build_version(udp.ca_addr_list());
-        msgs_size = version_msg.size();
-        msgs.push(version_msg);
+        let version_buf: Vec<u8> = CaMsg::build_version(udp.ca_addr_list()).to_buf();
+        // msgs_size = version_msg.size();
+        // msgs.push(version_msg);
+        buf_packet.extend_from_slice(&version_buf);
 
         // let mut name_searching_counter = 0;
         // let mut name_found_counter = 0;
@@ -388,7 +392,7 @@ impl Channels {
         // let mut monitor_starting_counter = 0;
         // let mut monitor_running_counter = 0;
 
-        let mut version_count = 0;
+        // let mut version_count = 0;
 
         for channel in self.searching_by_cid().values() {
             let name = channel.name();
@@ -428,27 +432,35 @@ impl Channels {
                 channel.increment_search_counter();
             }
 
-            let name_search_msg = CaMsg::build_name_search(name, cid, udp.ca_addr_list());
+            let name_search_buf = CaMsg::build_name_search(name, cid, udp.ca_addr_list()).to_buf();
+            if buf_packet.len() + name_search_buf.len() > MAX_UDP_SEND {
+                buf.push(buf_packet);
 
-            if msgs_size + name_search_msg.size() > MAX_UDP_SEND as u32 {
-                // patch with one or few CA_PROTO_VERSION messages
-                loop {
-                    let version_msg = CaMsg::build_version(udp.ca_addr_list());
-                    if msgs_size + version_msg.size() > MAX_UDP_SEND as u32 {
-                        break;
-                    }
-                    msgs_size += version_msg.size();
-                    msgs.push(version_msg);
-                }
-                let version_msg = CaMsg::build_version(udp.ca_addr_list());
-                msgs_size = version_msg.size();
-                msgs.push(version_msg);
-                version_count += 1;
+                buf_packet = vec![];
+                let version_buf: Vec<u8> = CaMsg::build_version(udp.ca_addr_list()).to_buf();
+                buf_packet.extend_from_slice(&CaMsg::build_version(udp.ca_addr_list()).to_buf());
             }
+            buf_packet.extend_from_slice(&name_search_buf);
 
-            msgs_size = msgs_size + name_search_msg.size();
+            // if msgs_size + name_search_msg.size() > MAX_UDP_SEND as u32 {
+            //     // patch with one or few CA_PROTO_VERSION messages
+            //     loop {
+            //         let version_msg = CaMsg::build_version(udp.ca_addr_list());
+            //         if msgs_size + version_msg.size() > MAX_UDP_SEND as u32 {
+            //             break;
+            //         }
+            //         msgs_size += version_msg.size();
+            //         msgs.push(version_msg);
+            //     }
+            //     let version_msg = CaMsg::build_version(udp.ca_addr_list());
+            //     msgs_size = version_msg.size();
+            //     msgs.push(version_msg);
+            //     version_count += 1;
+            // }
+
+            // msgs_size = msgs_size + name_search_msg.size();
             // msgs.push(CaMsg::build_version(udp.ca_addr_list()));
-            msgs.push(name_search_msg);
+            // msgs.push(name_search_msg);
         }
 
         // println!(
@@ -468,10 +480,18 @@ impl Channels {
         //         monitor_running_counter, name_found_counter, tcp_connected_counter, created_counter
         //     );
         // }
-        if msgs.len() > 1 {
-            udp.send_msgs(&msgs).await;
-        } else {
+        buf.push(buf_packet);
+
+        for buf_packet in buf {
+            if buf_packet.len() > 16 {
+                udp.send_buf(&buf_packet).await;
+            }
         }
+
+        // if buf.len() > 1 {
+        //     udp.send_buf(&buf).await;
+        // } else {
+        // }
     }
 }
 
