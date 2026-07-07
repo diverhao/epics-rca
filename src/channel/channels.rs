@@ -199,7 +199,6 @@ impl Channels {
         match channel {
             Some(channel) => {
                 self.remove_by_cid(cid);
-                let channel1 = Arc::clone(&channel);
                 self.searching_by_cid_mut().insert(cid, channel);
             }
             None => {}
@@ -211,7 +210,6 @@ impl Channels {
         match channel {
             Some(channel) => {
                 self.remove_by_cid(cid);
-                let channel1 = Arc::clone(&channel);
                 self.not_searching_by_cid_mut().insert(cid, channel);
             }
             None => {}

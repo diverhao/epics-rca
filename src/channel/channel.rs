@@ -198,7 +198,7 @@ impl Channel {
         // todo: why? the reset already
         // self.set_addr(None);
 
-        // Remove from Channels.by_name and Channels.by_cid.
+        // Remove from Channels.by_cid.
         if !reconnect {
             channels.remove_by_cid(self.cid());
         }
