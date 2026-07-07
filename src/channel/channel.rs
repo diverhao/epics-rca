@@ -201,7 +201,6 @@ impl Channel {
         // Remove from Channels.by_name and Channels.by_cid.
         if !reconnect {
             channels.remove_by_cid(self.cid());
-            channels.remove_by_name(self.name());
         }
     }
 

@@ -27,9 +27,7 @@ pub struct ChannelIo {
 }
 
 pub struct Channels {
-    searching_by_name: RwLock<HashMap<String, Arc<Channel>>>,
     searching_by_cid: RwLock<HashMap<u32, Arc<Channel>>>,
-    not_searching_by_name: RwLock<HashMap<String, Arc<Channel>>>,
     not_searching_by_cid: RwLock<HashMap<u32, Arc<Channel>>>,
     next_cid: AtomicU32,
     next_ioid: AtomicU32, // read and write
@@ -41,9 +39,7 @@ pub struct Channels {
 impl Channels {
     pub fn new() -> Self {
         Self {
-            searching_by_name: RwLock::new(HashMap::new()),
             searching_by_cid: RwLock::new(HashMap::new()),
-            not_searching_by_name: RwLock::new(HashMap::new()),
             not_searching_by_cid: RwLock::new(HashMap::new()),
             next_cid: AtomicU32::new(1),
             next_ioid: AtomicU32::new(0),
@@ -54,22 +50,12 @@ impl Channels {
     }
 
     pub fn create_channel(self: &Self, name: &str) -> Arc<Channel> {
-        let channel = self.channel_by_name(name);
-
-        match channel {
-            Some(channel) => {
-                warn!("Channel {name} is already created");
-                return channel;
-            }
-            None => {}
-        };
-
         let id = self.next_cid();
         let channel = Arc::new(Channel::new(name, id));
+
         let mut by_cid = self.searching_by_cid_mut();
-        let mut by_name = self.searching_by_name_mut();
-        by_name.insert(String::from(name), Arc::clone(&channel));
         by_cid.insert(id, Arc::clone(&channel));
+        
         debug!("Channel {name} created with id {id}");
         channel
     }
@@ -82,14 +68,6 @@ impl Channels {
 
     pub async fn destroy_channel_by_cid(self: &Self, cid: u32) {
         let channel = self.channel_by_cid(cid);
-        match channel {
-            Some(channel) => channel.destroy().await,
-            None => {}
-        }
-    }
-
-    pub async fn destroy_channel_by_name(self: &Self, name: String) {
-        let channel = self.channel_by_name(&name);
         match channel {
             Some(channel) => channel.destroy().await,
             None => {}
@@ -167,38 +145,16 @@ impl Channels {
 
     // -------------- channels -----------------
 
-    pub fn searching_by_name(self: &Self) -> RwLockReadGuard<'_, HashMap<String, Arc<Channel>>> {
-        self.searching_by_name.read().unwrap()
-    }
-
     pub fn searching_by_cid(self: &Self) -> RwLockReadGuard<'_, HashMap<u32, Arc<Channel>>> {
         self.searching_by_cid.read().unwrap()
-    }
-
-    pub fn searching_by_name_mut(
-        self: &Self,
-    ) -> RwLockWriteGuard<'_, HashMap<String, Arc<Channel>>> {
-        self.searching_by_name.write().unwrap()
     }
 
     pub fn searching_by_cid_mut(self: &Self) -> RwLockWriteGuard<'_, HashMap<u32, Arc<Channel>>> {
         self.searching_by_cid.write().unwrap()
     }
 
-    pub fn not_searching_by_name(
-        self: &Self,
-    ) -> RwLockReadGuard<'_, HashMap<String, Arc<Channel>>> {
-        self.not_searching_by_name.read().unwrap()
-    }
-
     pub fn not_searching_by_cid(self: &Self) -> RwLockReadGuard<'_, HashMap<u32, Arc<Channel>>> {
         self.not_searching_by_cid.read().unwrap()
-    }
-
-    pub fn not_searching_by_name_mut(
-        self: &Self,
-    ) -> RwLockWriteGuard<'_, HashMap<String, Arc<Channel>>> {
-        self.not_searching_by_name.write().unwrap()
     }
 
     pub fn not_searching_by_cid_mut(
@@ -223,60 +179,9 @@ impl Channels {
         }
     }
 
-    pub fn channel_by_name(self: &Self, name: &str) -> Option<Arc<Channel>> {
-        let channel = self.searching_channel_by_name(name);
-        match channel {
-            Some(channel) => return Some(channel),
-            None => {
-                let channel = self.not_searching_channel_by_name(name);
-                match channel {
-                    Some(channel) => {
-                        return Some(channel);
-                    }
-                    None => return None,
-                }
-            }
-        }
-    }
-
     pub fn remove_by_cid(self: &Self, cid: u32) {
-        let channel = self.searching_by_cid_mut().remove(&cid);
-        match channel {
-            Some(channel) => {
-                let name = channel.name();
-                self.searching_by_name_mut().remove(name);
-            }
-            None => {}
-        }
-
-        let channel = self.not_searching_by_cid_mut().remove(&cid);
-        match channel {
-            Some(channel) => {
-                let name = channel.name();
-                self.not_searching_by_name_mut().remove(name);
-            }
-            None => {}
-        }
-    }
-
-    pub fn remove_by_name(self: &Self, name: &str) {
-        let channel = self.searching_by_name_mut().remove(name);
-        match channel {
-            Some(channel) => {
-                let cid = channel.cid();
-                self.searching_by_cid_mut().remove(&cid);
-            }
-            None => {}
-        }
-
-        let channel = self.not_searching_by_name_mut().remove(name);
-        match channel {
-            Some(channel) => {
-                let cid = channel.cid();
-                self.not_searching_by_cid_mut().remove(&cid);
-            }
-            None => {}
-        }
+        self.searching_by_cid_mut().remove(&cid);
+        self.not_searching_by_cid_mut().remove(&cid);
     }
 
     pub fn searching_channel_by_cid(self: &Self, cid: u32) -> Option<Arc<Channel>> {
@@ -289,16 +194,6 @@ impl Channels {
         by_cid.get(&cid).cloned()
     }
 
-    pub fn searching_channel_by_name(self: &Self, name: &str) -> Option<Arc<Channel>> {
-        let by_name = self.searching_by_name();
-        by_name.get(name).cloned()
-    }
-
-    pub fn not_searching_channel_by_name(self: &Self, name: &str) -> Option<Arc<Channel>> {
-        let by_name = self.not_searching_by_name();
-        by_name.get(name).cloned()
-    }
-
     pub fn move_to_searching_by_cid(self: &Self, cid: u32) {
         let channel = self.not_searching_channel_by_cid(cid);
         match channel {
@@ -306,9 +201,6 @@ impl Channels {
                 self.remove_by_cid(cid);
                 let channel1 = Arc::clone(&channel);
                 self.searching_by_cid_mut().insert(cid, channel);
-                let name = channel1.name();
-                self.searching_by_name_mut()
-                    .insert(name.to_string(), channel1);
             }
             None => {}
         }
@@ -321,9 +213,6 @@ impl Channels {
                 self.remove_by_cid(cid);
                 let channel1 = Arc::clone(&channel);
                 self.not_searching_by_cid_mut().insert(cid, channel);
-                let name = channel1.name();
-                self.not_searching_by_name_mut()
-                    .insert(name.to_string(), channel1);
             }
             None => {}
         }
