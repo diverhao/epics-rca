@@ -373,10 +373,7 @@ impl Channels {
         let udp = context.udp();
 
         let mut buf: Vec<Vec<u8>> = vec![];
-        let mut buf_packet: Vec<u8> = vec![];
-
-        // let mut msgs = vec![];
-        let mut msgs_size: u32 = 0;
+        let mut buf_packet = Vec::with_capacity(MAX_UDP_SEND);
 
         let version_buf: Vec<u8> = CaMsg::build_version(udp.ca_addr_list()).to_buf();
         // msgs_size = version_msg.size();
@@ -436,9 +433,9 @@ impl Channels {
             if buf_packet.len() + name_search_buf.len() > MAX_UDP_SEND {
                 buf.push(buf_packet);
 
-                buf_packet = vec![];
+                buf_packet = Vec::with_capacity(MAX_UDP_SEND);
                 let version_buf: Vec<u8> = CaMsg::build_version(udp.ca_addr_list()).to_buf();
-                buf_packet.extend_from_slice(&CaMsg::build_version(udp.ca_addr_list()).to_buf());
+                buf_packet.extend_from_slice(&version_buf);
             }
             buf_packet.extend_from_slice(&name_search_buf);
 
