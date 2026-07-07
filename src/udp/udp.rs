@@ -80,7 +80,7 @@ impl UDP {
             }
         });
         tokio::spawn(async move {
-            let mut buf = [0_u8; 16 * MAX_UDP_SEND];
+            let mut buf = vec![0_u8; 16 * MAX_UDP_SEND];
             loop {
                 match socket_v6.recv_from(&mut buf).await {
                     Ok((size, remote_socket)) => {
