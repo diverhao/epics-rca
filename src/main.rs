@@ -1,5 +1,6 @@
 #![allow(dead_code, unused_imports, unused_variables)]
 
+mod alloc_stats;
 mod ca;
 mod channel;
 mod context;
@@ -23,7 +24,7 @@ use tokio::time::{self};
 use tokio::time::{Duration, sleep};
 
 #[tokio::main(flavor = "current_thread")]
-// #[tokio::main(flavor = "multi_thread", worker_threads = 15)]
+// #[tokio::main(flavor = "multi_thread", worker_threads = 4)]
 async fn main() {
     create_context(
         vec![
@@ -178,7 +179,38 @@ async fn main() {
         // });
     }
 
-    tokio::signal::ctrl_c()
-        .await
-        .expect("failed to listen for Ctrl-C");
+    print_alloc_stats("after-create-loop");
+
+    let mut alloc_report_interval = time::interval(Duration::from_secs(5));
+    let ctrl_c = tokio::signal::ctrl_c();
+    tokio::pin!(ctrl_c);
+
+    loop {
+        tokio::select! {
+            _ = alloc_report_interval.tick() => {
+                print_alloc_stats("periodic");
+            }
+            result = &mut ctrl_c => {
+                result.expect("failed to listen for Ctrl-C");
+                break;
+            }
+        }
+    }
+
+    print_alloc_stats("final");
+}
+
+fn print_alloc_stats(label: &str) {
+    let stats = alloc_stats::snapshot();
+    println!(
+        "ALLOC_STATS {label}: requested current {:.3} MiB, peak {:.3} MiB, peak-current {:.3} MiB; usable current {:.3} MiB, peak {:.3} MiB; calls alloc {}, dealloc {}, realloc {}",
+        alloc_stats::mib(stats.current_bytes),
+        alloc_stats::mib(stats.peak_bytes),
+        alloc_stats::mib(stats.peak_bytes.saturating_sub(stats.current_bytes)),
+        alloc_stats::mib(stats.current_usable_bytes),
+        alloc_stats::mib(stats.peak_usable_bytes),
+        stats.alloc_count,
+        stats.dealloc_count,
+        stats.realloc_count,
+    );
 }

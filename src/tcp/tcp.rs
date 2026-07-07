@@ -541,33 +541,38 @@ impl TCPs {
             debug!("TCP {addr} already exists");
             return Ok(tcp);
         } else {
-            if let Some(tcp) = self.connecting_tcp(&addr) {
-                //todo: wait for notifier to notify, the notifier should be in TCP
+            let (tcp, should_connect): (Arc<TCP>, bool) = {
+                let mut connecting = self.connecting_tcps_mut();
+                if let Some(tcp) = connecting.iter().find(|tcp| *tcp.addr() == addr).cloned() {
+                    (tcp, false)
+                } else {
+                    self.self_connect_count.fetch_add(1, Ordering::Relaxed);
+                    let tcp: Arc<TCP> = Arc::new(TCP {
+                        reader: Arc::new(Mutex::new(None)),
+                        writer: Arc::new(Mutex::new(None)),
+                        read_task: Mutex::new(None),
+                        state: RwLock::new(TcpState::NotConnected),
+                        connect_notify: Notify::new(),
+                        addr: addr,
+                        cids: RwLock::new(HashSet::new()),
+                        check_alive_task: Mutex::new(None),
+                        alive: AtomicBool::new(true),
+                        paused: AtomicBool::new(false),
+                        queue_msg_send: RwLock::new(VecDeque::from([])),
+                    });
+                    tcp.set_state(TcpState::Connecting);
+                    connecting.push(Arc::clone(&tcp));
+                    (tcp, true)
+                }
+            };
+
+            if !should_connect {
                 self.wait_connected_count.fetch_add(1, Ordering::Relaxed);
                 tcp.wait_connected().await?;
-                // self.wait_connected_count.fetch_sub(1, Ordering::Relaxed);
                 return Ok(tcp);
             }
-            self.self_connect_count.fetch_add(1, Ordering::Relaxed);
-            // tcp may take long while to create
-            let id = rand::random::<u32>();
-            let id1 = id;
-            let tcp: Arc<TCP> = Arc::new(TCP {
-                reader: Arc::new(Mutex::new(None)),
-                writer: Arc::new(Mutex::new(None)),
-                read_task: Mutex::new(None),
-                state: RwLock::new(TcpState::NotConnected),
-                connect_notify: Notify::new(),
-                addr: addr,
-                cids: RwLock::new(HashSet::new()),
-                check_alive_task: Mutex::new(None),
-                alive: AtomicBool::new(true),
-                paused: AtomicBool::new(false),
-                queue_msg_send: RwLock::new(VecDeque::from([])),
-            });
+
             let tcp_1 = Arc::clone(&tcp);
-            tcp.set_state(TcpState::Connecting);
-            self.connecting_tcps_mut().push(Arc::clone(&tcp));
 
             match timeout(Duration::from_secs(10), async move {
                 // let tcp: Result<TCP, String> = TCP::new(addr).await;
@@ -588,14 +593,13 @@ impl TCPs {
             .await
             {
                 Ok(Ok(tcp)) => {
+                    tcp.set_state(TcpState::Connected);
                     {
                         let mut connecting = self.connecting_tcps_mut();
                         if let Some(index) = connecting.iter().position(|t| *t.addr() == addr) {
                             connecting.remove(index);
                         }
                     }
-                    self.tcps_mut().push(Arc::clone(&tcp));
-                    tcp.set_state(TcpState::Connected);
 
                     let tcp_listener = Arc::clone(&tcp);
                     tcp_listener.start_to_listen().await;
@@ -612,11 +616,13 @@ impl TCPs {
                     let client_name_msg = CaMsg::build_client_name(&dests);
                     let host_name_msg = CaMsg::build_host_name(&dests);
                     tcp.send_msgs(vec![version_msg, client_name_msg, host_name_msg]);
+                    self.tcps_mut().push(Arc::clone(&tcp));
+
                     // wait for 500 ms to send out the packet
-                    match timeout(Duration::from_millis(500), async move {}).await {
-                        Ok(_) => {}
-                        Err(_) => {}
-                    };
+                    // match timeout(Duration::from_millis(500), async move {}).await {
+                    //     Ok(_) => {}
+                    //     Err(_) => {}
+                    // };
 
                     // async work is done
                     // todo: notify waiters to go, which is in this function

@@ -55,7 +55,7 @@ impl Channels {
 
         let mut by_cid = self.searching_by_cid_mut();
         by_cid.insert(id, Arc::clone(&channel));
-        
+
         debug!("Channel {name} created with id {id}");
         channel
     }
@@ -164,14 +164,17 @@ impl Channels {
     }
 
     pub fn channel_by_cid(self: &Self, cid: u32) -> Option<Arc<Channel>> {
-        let channel = self.searching_channel_by_cid(cid);
+        let searching = self.searching_by_cid();
+        let not_searching = self.not_searching_by_cid();
+
+        let channel = searching.get(&cid);
         match channel {
-            Some(channel) => return Some(channel),
+            Some(channel) => return Some(channel.clone()),
             None => {
-                let channel = self.not_searching_channel_by_cid(cid);
+                let channel = not_searching.get(&cid);
                 match channel {
                     Some(channel) => {
-                        return Some(channel);
+                        return Some(channel.clone());
                     }
                     None => return None,
                 }
@@ -195,24 +198,22 @@ impl Channels {
     }
 
     pub fn move_to_searching_by_cid(self: &Self, cid: u32) {
-        let channel = self.not_searching_channel_by_cid(cid);
-        match channel {
-            Some(channel) => {
-                self.remove_by_cid(cid);
-                self.searching_by_cid_mut().insert(cid, channel);
-            }
-            None => {}
+        // lock both maps
+        let mut searching = self.searching_by_cid_mut();
+        let mut not_searching = self.not_searching_by_cid_mut();
+
+        if let Some(channel) = not_searching.remove(&cid) {
+            searching.insert(cid, channel);
         }
     }
 
-    pub fn move_to_not_searching_by_cid(self: &Self, cid: u32) {
-        let channel = self.searching_channel_by_cid(cid);
-        match channel {
-            Some(channel) => {
-                self.remove_by_cid(cid);
-                self.not_searching_by_cid_mut().insert(cid, channel);
-            }
-            None => {}
+    pub fn move_to_not_searching_by_cid(&self, cid: u32) {
+        // lock both maps
+        let mut searching = self.searching_by_cid_mut();
+        let mut not_searching = self.not_searching_by_cid_mut();
+
+        if let Some(channel) = searching.remove(&cid) {
+            not_searching.insert(cid, channel);
         }
     }
 
