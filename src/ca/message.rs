@@ -133,12 +133,18 @@ impl CaMsg {
                 match CaHeader::from_buf(buf) {
                     Ok(ca_header) => {
                         // everything is OK
-                        let header_size = ca_header.size();
-                        let payload_size = ca_header.payload_size;
-                        let msg_len = header_size + payload_size;
-                        let payload = buf[header_size as usize..msg_len as usize].to_vec();
+                        let header_size = ca_header.size() as usize;
+                        let payload_size = ca_header.payload_size as usize;
+                        let msg_len = match header_size.checked_add(payload_size) {
+                            Some(msg_len) => msg_len,
+                            None => {
+                                buf.clear();
+                                break;
+                            }
+                        };
+                        let payload = buf[header_size..msg_len].to_vec();
 
-                        buf.drain(..msg_len as usize);
+                        buf.drain(..msg_len);
                         let dest = dest.clone();
                         let msg = CaMsg {
                             header: ca_header,

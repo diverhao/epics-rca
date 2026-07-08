@@ -284,6 +284,8 @@ impl DbrType {
 
 impl DbrData {
     pub fn from_buf(buf: &Vec<u8>, data_type: DbrType, data_count: u32) -> Result<Self, String> {
+        Self::validate_payload_len(buf, data_type, data_count)?;
+
         match data_type {
             DbrType::String => Ok(DbrData::String(PlainData {
                 value: Self::parse_string(&buf, 0, data_count)?,
@@ -450,6 +452,146 @@ impl DbrData {
         let data_type =
             DbrType::from_u16(data_type).ok_or_else(|| format!("Invalid DBR type {data_type}"))?;
         Self::from_buf(&buf, data_type, data_count)
+    }
+
+    fn checked_value_end(
+        start: usize,
+        data_count: u32,
+        elem_size: usize,
+    ) -> Result<usize, String> {
+        let data_count =
+            usize::try_from(data_count).map_err(|_| "Element count too large".to_string())?;
+        let len = data_count
+            .checked_mul(elem_size)
+            .ok_or_else(|| "DBR payload length overflow".to_string())?;
+        start
+            .checked_add(len)
+            .ok_or_else(|| "DBR payload length overflow".to_string())
+    }
+
+    fn padded_len(len: usize) -> Result<usize, String> {
+        len.checked_add(7)
+            .map(|len| len & !7)
+            .ok_or_else(|| "DBR padded payload length overflow".to_string())
+    }
+
+    fn expected_payload_len(data_type: DbrType, data_count: u32) -> Result<usize, String> {
+        match data_type {
+            DbrType::String | DbrType::ClassName => Self::checked_value_end(0, data_count, 40),
+            DbrType::Short => Self::checked_value_end(0, data_count, 2),
+            DbrType::Float => Self::checked_value_end(0, data_count, 4),
+            DbrType::Enum | DbrType::PutAckt | DbrType::PutAcks => {
+                Self::checked_value_end(0, data_count, 2)
+            }
+            DbrType::Char => Self::checked_value_end(0, data_count, 1),
+            DbrType::Long => Self::checked_value_end(0, data_count, 4),
+            DbrType::Double => Self::checked_value_end(0, data_count, 8),
+            DbrType::StsString | DbrType::GrString | DbrType::CtrlString => {
+                Self::checked_value_end(DBR_STS_STRING_VALUE_OFFSET as usize, data_count, 40)
+            }
+            DbrType::StsShort => {
+                Self::checked_value_end(DBR_STS_SHORT_VALUE_OFFSET as usize, data_count, 2)
+            }
+            DbrType::StsFloat => {
+                Self::checked_value_end(DBR_STS_FLOAT_VALUE_OFFSET as usize, data_count, 4)
+            }
+            DbrType::StsEnum => {
+                Self::checked_value_end(DBR_STS_ENUM_VALUE_OFFSET as usize, data_count, 2)
+            }
+            DbrType::StsChar => {
+                Self::checked_value_end(DBR_STS_CHAR_VALUE_OFFSET as usize, data_count, 1)
+            }
+            DbrType::StsLong => {
+                Self::checked_value_end(DBR_STS_LONG_VALUE_OFFSET as usize, data_count, 4)
+            }
+            DbrType::StsDouble => {
+                Self::checked_value_end(DBR_STS_DOUBLE_VALUE_OFFSET as usize, data_count, 8)
+            }
+            DbrType::TimeString => {
+                Self::checked_value_end(DBR_TIME_STRING_VALUE_OFFSET as usize, data_count, 40)
+            }
+            DbrType::TimeShort => {
+                Self::checked_value_end(DBR_TIME_SHORT_VALUE_OFFSET as usize, data_count, 2)
+            }
+            DbrType::TimeFloat => {
+                Self::checked_value_end(DBR_TIME_FLOAT_VALUE_OFFSET as usize, data_count, 4)
+            }
+            DbrType::TimeEnum => {
+                Self::checked_value_end(DBR_TIME_ENUM_VALUE_OFFSET as usize, data_count, 2)
+            }
+            DbrType::TimeChar => {
+                Self::checked_value_end(DBR_TIME_CHAR_VALUE_OFFSET as usize, data_count, 1)
+            }
+            DbrType::TimeLong => {
+                Self::checked_value_end(DBR_TIME_LONG_VALUE_OFFSET as usize, data_count, 4)
+            }
+            DbrType::TimeDouble => {
+                Self::checked_value_end(DBR_TIME_DOUBLE_VALUE_OFFSET as usize, data_count, 8)
+            }
+            DbrType::GrShort => {
+                Self::checked_value_end(DBR_GR_SHORT_VALUE_OFFSET as usize, data_count, 2)
+            }
+            DbrType::GrFloat => {
+                Self::checked_value_end(DBR_GR_FLOAT_VALUE_OFFSET as usize, data_count, 4)
+            }
+            DbrType::GrEnum => {
+                Self::checked_value_end(DBR_GR_ENUM_VALUE_OFFSET as usize, data_count, 2)
+            }
+            DbrType::GrChar => {
+                Self::checked_value_end(DBR_GR_CHAR_VALUE_OFFSET as usize, data_count, 1)
+            }
+            DbrType::GrLong => {
+                Self::checked_value_end(DBR_GR_LONG_VALUE_OFFSET as usize, data_count, 4)
+            }
+            DbrType::GrDouble => {
+                Self::checked_value_end(DBR_GR_DOUBLE_VALUE_OFFSET as usize, data_count, 8)
+            }
+            DbrType::CtrlShort => {
+                Self::checked_value_end(DBR_CTRL_SHORT_VALUE_OFFSET as usize, data_count, 2)
+            }
+            DbrType::CtrlFloat => {
+                Self::checked_value_end(DBR_CTRL_FLOAT_VALUE_OFFSET as usize, data_count, 4)
+            }
+            DbrType::CtrlEnum => {
+                Self::checked_value_end(DBR_CTRL_ENUM_VALUE_OFFSET as usize, data_count, 2)
+            }
+            DbrType::CtrlChar => {
+                Self::checked_value_end(DBR_CTRL_CHAR_VALUE_OFFSET as usize, data_count, 1)
+            }
+            DbrType::CtrlLong => {
+                Self::checked_value_end(DBR_CTRL_LONG_VALUE_OFFSET as usize, data_count, 4)
+            }
+            DbrType::CtrlDouble => {
+                Self::checked_value_end(DBR_CTRL_DOUBLE_VALUE_OFFSET as usize, data_count, 8)
+            }
+            DbrType::StsAckString => {
+                Self::checked_value_end(DBR_STSACK_STRING_VALUE_OFFSET as usize, data_count, 40)
+            }
+        }
+    }
+
+    fn validate_payload_len(
+        buf: &[u8],
+        data_type: DbrType,
+        data_count: u32,
+    ) -> Result<(), String> {
+        let expected_len = Self::expected_payload_len(data_type, data_count)?;
+        if buf.len() < expected_len {
+            return Err(format!(
+                "DBR payload too short for {data_type:?}: need {expected_len} bytes, got {}",
+                buf.len()
+            ));
+        }
+
+        let padded_len = Self::padded_len(expected_len)?;
+        if buf.len() > padded_len {
+            return Err(format!(
+                "DBR payload too long for {data_type:?}: expected at most {padded_len} bytes, got {}",
+                buf.len()
+            ));
+        }
+
+        Ok(())
     }
 
     fn value_range(

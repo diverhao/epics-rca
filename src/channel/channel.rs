@@ -288,7 +288,7 @@ impl Channel {
             None => {
                 // remove this IO
                 get_context().channels().remove_io_by_ioid(ioid);
-                return Err("Message error: no data type".to_string());
+                return Err("DBR decode error: invalid data type".to_string());
             }
         };
 
@@ -311,8 +311,8 @@ impl Channel {
                 // todo: return dbr_data first, then call callback
                 return Ok(dbr_data);
             }
-            Err(_) => {
-                return Err("No dbr data".to_string());
+            Err(reason) => {
+                return Err(format!("DBR decode error: {reason}"));
             }
         }
     }

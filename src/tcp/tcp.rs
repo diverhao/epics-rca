@@ -153,6 +153,7 @@ impl TCP {
 
             loop {
                 // hygrid read: async reader.read() + wait 250 micro-seconds for more data + sync reader.try_read()
+                // in this way, we can reduce the calls of reader.read() saving CPU
                 //
                 // async read() wakes up when there is one byte in socket
                 // wait 250 micro-seconds for more data
@@ -196,7 +197,9 @@ impl TCP {
                         let msgs =
                             CaMsg::from_buf(&mut buf, Some(tcp.addr().clone()), vec![], true);
                         let src = *tcp.addr();
-                        handle_tcp_msgs(&src, msgs);
+                        if !handle_tcp_msgs(&src, msgs) {
+                            buf.clear();
+                        }
                     }
                     Err(err) => {
                         tcp.handle_tcp_failure(false, true).await;

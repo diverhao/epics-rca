@@ -188,7 +188,12 @@ impl CaHeader {
             )
         };
 
-        if header_size + payload_size > buf.len() as u32 {
+        let msg_len = match (header_size as usize).checked_add(payload_size as usize) {
+            Some(msg_len) => msg_len,
+            None => return Err(String::from("Error: Header and payload length overflow")),
+        };
+
+        if msg_len > buf.len() {
             Err(String::from(
                 "Warning: Remaining buffer too short for header and payload",
             ))

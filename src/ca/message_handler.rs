@@ -25,10 +25,13 @@ pub fn handle_udp_msgs(src: &SocketAddr, msgs: Vec<CaMsg>) {
     }
 }
 
-pub fn handle_tcp_msgs(src: &SocketAddr, msgs: Vec<CaMsg>) {
+pub fn handle_tcp_msgs(src: &SocketAddr, msgs: Vec<CaMsg>) -> bool {
     for msg in msgs {
-        handle_tcp_msg(src, msg);
+        if !handle_tcp_msg(src, msg) {
+            return false;
+        }
     }
+    true
 }
 
 pub fn handle_udp_msg(src: &SocketAddr, msg: CaMsg) {
@@ -45,12 +48,12 @@ pub fn handle_udp_msg(src: &SocketAddr, msg: CaMsg) {
     }
 }
 
-pub fn handle_tcp_msg(src: &SocketAddr, msg: CaMsg) {
+pub fn handle_tcp_msg(src: &SocketAddr, msg: CaMsg) -> bool {
     let cmd = msg.header().cmd;
     debug!("\nReceived from {src}: {msg}");
     match cmd {
         CaCmd::CaProtoEcho => handle_ca_proto_echo(msg),
-        CaCmd::CaProtoEventAdd => handle_ca_proto_event_add(msg),
+        CaCmd::CaProtoEventAdd => return handle_ca_proto_event_add(msg),
         CaCmd::CaProtoEventCancel => handle_ca_proto_event_cancel(msg),
         CaCmd::CaProtoRead => handle_ca_proto_read(msg),
         CaCmd::CaProtoWrite => handle_ca_proto_write(msg),
@@ -61,7 +64,7 @@ pub fn handle_tcp_msg(src: &SocketAddr, msg: CaMsg) {
         CaCmd::CaProtoReadSync => handle_ca_proto_read_sync(msg),
         CaCmd::CaProtoError => handle_ca_proto_error(msg),
         CaCmd::CaProtoClearChannel => handle_ca_proto_clear_channel(msg),
-        CaCmd::CaProtoReadNotify => handle_ca_proto_read_notify(msg),
+        CaCmd::CaProtoReadNotify => return handle_ca_proto_read_notify(msg),
         CaCmd::CaProtoReadBuild => handle_ca_proto_read_build(msg),
         CaCmd::CaProtoCreateChan => handle_ca_proto_create_chan(msg),
         CaCmd::CaProtoWriteNotify => handle_ca_proto_write_notify(msg),
@@ -73,6 +76,7 @@ pub fn handle_tcp_msg(src: &SocketAddr, msg: CaMsg) {
         CaCmd::CaProtoServerDisconn => handle_ca_proto_server_disconn(msg),
         _ => {}
     }
+    true
 }
 
 fn handle_ca_proto_echo(msg: CaMsg) {
@@ -207,26 +211,33 @@ fn handle_ca_proto_create_chan(msg: CaMsg) {
     channel_io.get_step_2();
 }
 
-fn handle_ca_proto_read_notify(msg: CaMsg) {
+fn handle_ca_proto_read_notify(msg: CaMsg) -> bool {
     // tell the get() to proceed
     let ioid = msg.header().param2;
 
     let io = match get_context().channels().io(ioid) {
         Some(io) => io,
-        None => return,
+        None => return true,
     };
     let cid = io.cid;
     let channel = match get_context().channels().channel_by_cid(cid) {
         Some(channel) => channel,
-        None => return,
+        None => return true,
     };
     match channel.get_step_3(msg) {
-        Ok(dbr_data) => {}
-        Err(_) => {}
-    };
+        Ok(_dbr_data) => true,
+        Err(reason) => {
+            if reason.starts_with("DBR decode error:") {
+                error!("Failed to decode CA_PROTO_READ_NOTIFY DBR payload: {reason}");
+                false
+            } else {
+                true
+            }
+        }
+    }
 }
 
-fn handle_ca_proto_event_add(msg: CaMsg) {
+fn handle_ca_proto_event_add(msg: CaMsg) -> bool {
     let subid: u32 = msg.header().param2; // actually cid
     let cid = subid;
     let data_count = msg.header().data_count;
@@ -234,24 +245,41 @@ fn handle_ca_proto_event_add(msg: CaMsg) {
     let data_type_num = msg.header().data_type;
     let data_type = match DbrType::from_u16(data_type_num) {
         Some(data_type) => data_type,
-        None => return,
+        None => {
+            error!("Invalid CA_PROTO_EVENT_ADD DBR type {data_type_num}");
+            return false;
+        }
     };
 
     let channel = match get_context().channels().channel_by_cid(subid) {
         Some(channel) => channel,
-        None => return, // cannot find channel in Channels registry
+        None => return true, // cannot find channel in Channels registry
     };
 
     if channel.state() != ChannelState::Created {
         debug!("Channel not Created.");
-        return;
+        return true;
     }
 
     // must be Starting or Running
     if channel.monitor_state() == MonitorState::NotRunning {
         debug!("Monitor has been stopped");
-        return;
+        return true;
     }
+
+    let callback_and_data = if let Some(callback) = channel.monitor_callback().clone() {
+        // Decode the data before mutating monitor state. If this payload is malformed,
+        // the current event is discarded and the TCP buffer will be flushed by the caller.
+        match DbrData::from_buf(msg.payload(), data_type, data_count) {
+            Ok(dbr_data) => Some((callback, dbr_data)),
+            Err(reason) => {
+                error!("Failed to decode CA_PROTO_EVENT_ADD DBR payload: {reason}");
+                return false;
+            }
+        }
+    } else {
+        None
+    };
 
     // update the monitor state each time
     if channel.monitor_state() == MonitorState::Starting {
@@ -280,20 +308,12 @@ fn handle_ca_proto_event_add(msg: CaMsg) {
 
     // call callback
     // todo: ECA_XXX status
-    if let Some(callback) = channel.monitor_callback().clone() {
-        // decode the data as late as possible
-        let dbr_data = DbrData::from_buf(msg.payload(), data_type, data_count);
-        match dbr_data {
-            Ok(dbr_data) => {
-                callback(cid, data_type, data_count, &dbr_data);
-            }
-            Err(_) => {
-                // failed to decode payload
-            }
-        };
+    if let Some((callback, dbr_data)) = callback_and_data {
+        callback(cid, data_type, data_count, &dbr_data);
     } else {
         // no callback
     }
+    true
 }
 
 fn handle_ca_proto_event_cancel(msg: CaMsg) {
