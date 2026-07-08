@@ -103,6 +103,7 @@ async fn main() {
     // channel1.get(Some(5.0), None, None, None).await;
 
     let callback1 = Arc::new(move |cid: u32, data_type: DbrType, data_count: u32, dbr_data: &DbrData| {
+        // println!("{}", dbr_data);
         // println!(">> {}", channel.name());
         // debug!(
         //     "{} has a new value: {:?}, {}",
@@ -176,7 +177,7 @@ async fn main() {
         let name = format!("val{}", ii);
         // println!("{}", name);
         let channel = context.create_channel(&name);
-        channel.start_to_monitor(Some(MonitorDataType::NativeTime), None, None);
+        channel.start_to_monitor(Some(MonitorDataType::NativeTime), None, Some(callback));
         // println!("-->{}", name);
         // });
     }

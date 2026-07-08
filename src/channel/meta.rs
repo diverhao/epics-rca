@@ -14,12 +14,10 @@ use crate::channel::dbr::{DbrType, DbrValue};
 use log::{debug, error, warn};
 
 pub struct Meta {
-    // state
     pub state: ChannelState,
+    pub sid: u32, // server ID, assigned after channel created on server
+    pub addr: Option<SocketAddr>,
     pub access_right: ChannelAccessRights,
-    // status, severity, and native dbr_type
-    pub status: ChannelStatus,
-    pub severity: ChannelSeverity,
     pub data_type_native: DbrType,
     pub data_count_native: u32,
 }
@@ -28,9 +26,9 @@ impl Meta {
     pub fn new() -> Meta {
         Meta {
             state: ChannelState::NameSearching,
+            sid: 0,
+            addr: None,
             access_right: ChannelAccessRights::None,
-            status: ChannelStatus::NoAlarm,
-            severity: ChannelSeverity::NoAlarm,
             data_type_native: DbrType::Double,
             data_count_native: 0,
         }
@@ -42,16 +40,16 @@ impl Meta {
         self.state
     }
 
+    pub fn sid(&self) -> u32 {
+        self.sid
+    }
+
+    pub fn addr(&self) -> Option<SocketAddr> {
+        self.addr
+    }
+
     pub fn access_right(&self) -> ChannelAccessRights {
         self.access_right
-    }
-
-    pub fn status(&self) -> ChannelStatus {
-        self.status
-    }
-
-    pub fn severity(&self) -> ChannelSeverity {
-        self.severity
     }
 
     pub fn data_type_native(self: &Self) -> DbrType {
@@ -65,9 +63,9 @@ impl Meta {
     // setters
     pub fn reset(self: &mut Self) {
         self.set_state(ChannelState::NameSearching);
+        self.set_sid(0);
+        self.set_addr(None);
         self.set_access_right(ChannelAccessRights::None);
-        self.set_status(ChannelStatus::NoAlarm);
-        self.set_severity(ChannelSeverity::NoAlarm);
         self.set_data_type_native(DbrType::Double);
         self.set_data_count_native(0);
     }
@@ -76,12 +74,12 @@ impl Meta {
         self.state = new_state;
     }
 
-    pub fn set_status(&mut self, new_status: ChannelStatus) {
-        self.status = new_status;
+    pub fn set_sid(&mut self, new_sid: u32) {
+        self.sid = new_sid;
     }
 
-    pub fn set_severity(&mut self, new_severity: ChannelSeverity) {
-        self.severity = new_severity;
+    pub fn set_addr(&mut self, new_addr: Option<SocketAddr>) {
+        self.addr = new_addr;
     }
 
     pub fn set_data_type_native(&mut self, new_data_type_native: DbrType) {
@@ -102,8 +100,6 @@ impl std::fmt::Display for Meta {
         writeln!(f, "Meta {{")?;
         writeln!(f, "    state: {:?},", self.state())?;
         writeln!(f, "    access_right: {:?},", self.access_right())?;
-        writeln!(f, "    status: {:?},", self.status())?;
-        writeln!(f, "    severity: {:?},", self.severity())?;
         writeln!(f, "    data_type_native: {:?},", self.data_type_native())?;
         writeln!(f, "    data_count_native: {},", self.data_count_native())?;
         write!(f, "}}")
@@ -117,12 +113,12 @@ impl Channel {
         self.meta().state()
     }
 
-    pub fn status(&self) -> ChannelStatus {
-        self.meta().status()
+    pub fn sid(&self) -> u32 {
+        self.meta().sid()
     }
 
-    pub fn severity(&self) -> ChannelSeverity {
-        self.meta().severity()
+    pub fn addr(&self) -> Option<SocketAddr> {
+        self.meta().addr()
     }
 
     pub fn data_type_native(self: &Self) -> DbrType {
@@ -164,12 +160,12 @@ impl Channel {
         // }
     }
 
-    pub fn set_status(&self, new_status: ChannelStatus) {
-        self.meta_mut().set_status(new_status);
+    pub fn set_sid(&self, new_sid: u32) {
+        self.meta_mut().set_sid(new_sid);
     }
 
-    pub fn set_severity(&self, new_severity: ChannelSeverity) {
-        self.meta_mut().set_severity(new_severity);
+    pub fn set_addr(&self, new_addr: Option<SocketAddr>) {
+        self.meta_mut().set_addr(new_addr);
     }
 
     pub fn set_data_type_native(&self, new_data_type_native: DbrType) {

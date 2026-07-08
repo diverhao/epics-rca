@@ -22,13 +22,14 @@ use tokio::time::timeout;
 pub type ChannelCallback = Arc<dyn Fn(u32, DbrType, u32, &DbrData) + Send + Sync + 'static>;
 
 pub struct Channel {
+    // fixed, never change
     name: String,
     cid: u32,       // client ID
-    sid: AtomicU32, // server ID, assigned after channel created on server
+    // dynamic data
+    // from server, sid, access right, data count, data type, 
+    // search: state, server address
     meta: RwLock<Meta>,
-    value: RwLock<Option<DbrValue>>,
     search_counter: AtomicU32,
-    addr: RwLock<Option<SocketAddr>>,
     state_change_notifier: Notify,
     monitor: RwLock<Monitor>,
 }
@@ -38,11 +39,8 @@ impl Channel {
         Channel {
             name: name.to_string(),
             cid: cid,
-            sid: AtomicU32::new(0),
             search_counter: AtomicU32::new(1),
             meta: RwLock::new(Meta::new()),
-            value: RwLock::new(None),
-            addr: RwLock::new(None),
             state_change_notifier: Notify::new(),
             monitor: RwLock::new(Monitor::new()),
         }
@@ -238,7 +236,6 @@ impl Channel {
         self.set_search_counter(1);
         self.meta_mut().reset();
         self.set_addr(None);
-        self.set_value(None);
         self.set_addr(None);
         get_context().channels().remove_io_by_cid(self.cid());
         self.set_state(ChannelState::NameSearching, false);
@@ -368,17 +365,6 @@ impl Channel {
 
     // ------------- data setter ----------------
 
-    pub fn set_sid(&self, new_sid: u32) {
-        self.sid.store(new_sid, Ordering::Relaxed);
-    }
-
-    pub fn set_addr(self: &Self, new_addr: Option<SocketAddr>) {
-        *self.addr.write().unwrap() = new_addr;
-    }
-
-    pub fn set_value(&self, new_value: Option<DbrValue>) {
-        *self.value.write().unwrap() = new_value;
-    }
 
     pub fn increment_search_counter(&self) -> u32 {
         self.search_counter.fetch_add(1, Ordering::Relaxed) + 1
@@ -392,16 +378,8 @@ impl Channel {
         self.search_counter.store(counter, Ordering::Relaxed);
     }
 
-    pub fn reset_sid(self: &Self) -> u32 {
-        self.sid.swap(0, Ordering::Relaxed)
-    }
-
     pub fn reset_meta(self: &Self) {
         self.meta_mut().reset();
-    }
-
-    pub fn reset_value(self: &Self) {
-        self.set_value(None);
     }
 
     // --------------- data getter ---------------------
@@ -426,24 +404,12 @@ impl Channel {
         self.monitor.write().unwrap()
     }
 
-    pub fn value(&self) -> RwLockReadGuard<'_, Option<DbrValue>> {
-        self.value.read().unwrap()
-    }
-
     pub fn cid(&self) -> u32 {
         self.cid
     }
 
-    pub fn sid(&self) -> u32 {
-        self.sid.load(Ordering::Relaxed)
-    }
-
     pub fn search_counter(&self) -> u32 {
         self.search_counter.load(Ordering::Relaxed)
-    }
-
-    pub fn addr(self: &Self) -> Option<SocketAddr> {
-        self.addr.read().unwrap().clone()
     }
 
     pub fn state_change_notifier(self: &Self) -> &Notify {
@@ -496,7 +462,6 @@ impl std::fmt::Display for Channel {
         writeln!(f, "    cid: {},", self.cid)?;
         writeln!(f, "    sid: {},", self.sid())?;
         writeln!(f, "    meta: {},", meta)?;
-        writeln!(f, "    value: {:?},", self.value.read().unwrap().as_ref())?;
         writeln!(f, "    search_counter: {},", self.search_counter())?;
         writeln!(f, "    addr: {:?},", self.addr())?;
         writeln!(f, "    monitor: {}", monitor)?;
