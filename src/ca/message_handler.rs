@@ -1,7 +1,9 @@
 use crate::ca::cmd::CaCmd;
 use crate::ca::message::{CA_MINOR_VERSION, CaMsg, SearchReplyFlag};
+use crate::channel::channel::Channel;
 use crate::channel::dbr::{ChannelAccessRights, ChannelSeverity, ChannelState, ChannelStatus};
 use crate::channel::dbr::{DbrType, DbrValue};
+use crate::channel::dbr_data::DbrData;
 use crate::channel::monitor::{Monitor, MonitorState};
 use crate::channel::{self, monitor};
 use crate::context::context::get_context;
@@ -170,7 +172,7 @@ fn handle_ca_proto_access_rights(msg: CaMsg) {
 
 fn handle_ca_proto_create_chan(msg: CaMsg) {
     let header = msg.header();
-    let Some(dbr_type) = DbrType::from_u16(header.data_type) else {
+    let Some(data_type) = DbrType::from_u16(header.data_type) else {
         return;
     };
 
@@ -190,7 +192,7 @@ fn handle_ca_proto_create_chan(msg: CaMsg) {
         return;
     }
     channel.set_sid(sid);
-    channel.set_dbr_type_native(dbr_type);
+    channel.set_data_type_native(data_type);
     channel.set_data_count_native(data_count);
     // do it when everything is ready
     channel.set_state(ChannelState::Created, true);
@@ -218,18 +220,23 @@ fn handle_ca_proto_read_notify(msg: CaMsg) {
         Some(channel) => channel,
         None => return,
     };
-    channel.get_step_3(msg);
+    match channel.get_step_3(msg) {
+        Ok(dbr_data) => {}
+        Err(_) => {}
+    };
 }
 
 fn handle_ca_proto_event_add(msg: CaMsg) {
     let subid: u32 = msg.header().param2; // actually cid
+    let cid = subid;
     let data_count = msg.header().data_count;
     let num_elem = msg.header().data_count;
-    let dbr_type_num = msg.header().data_type;
-    let dbr_type = match DbrType::from_u16(dbr_type_num) {
-        Some(dbr_type) => dbr_type,
+    let data_type_num = msg.header().data_type;
+    let data_type = match DbrType::from_u16(data_type_num) {
+        Some(data_type) => data_type,
         None => return,
     };
+
     let channel = match get_context().channels().channel_by_cid(subid) {
         Some(channel) => channel,
         None => return, // cannot find channel in Channels registry
@@ -246,11 +253,9 @@ fn handle_ca_proto_event_add(msg: CaMsg) {
         return;
     }
 
-    // update value and meta first, 5%
-    channel.update_value(msg.payload(), num_elem, dbr_type);
-
     // update the monitor state each time
     if channel.monitor_state() == MonitorState::Starting {
+        // for benchmark
         get_context()
             .tcps()
             .running_monitor_count
@@ -270,11 +275,23 @@ fn handle_ca_proto_event_add(msg: CaMsg) {
         }
         channel.set_monitor_state(MonitorState::Running);
         channel.set_monitor_data_count(data_count);
-        channel.set_monitor_data_type(dbr_type);
+        channel.set_monitor_data_type(data_type);
     }
 
-    // call callback, it is already set, 10%
-    channel.call_monitor_callback();
+    // call callback
+    // todo: ECA_XXX status
+    if let Some(callback) = channel.monitor_callback().clone() {
+        // decode the data as late as possible
+        let dbr_data = DbrData::from_buf(msg.payload(), data_type, data_count);
+        match dbr_data {
+            Ok(dbr_data) => {
+                callback(cid, data_type, data_count, &dbr_data);
+            }
+            Err(_) => {}
+        };
+    } else {
+        // no callback
+    }
 }
 
 fn handle_ca_proto_event_cancel(msg: CaMsg) {

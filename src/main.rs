@@ -10,7 +10,9 @@ mod udp;
 
 use crate::channel::channel::Channel;
 use crate::channel::dbr::ChannelState;
+use crate::channel::dbr::DbrType;
 use crate::channel::dbr::DbrValue;
+use crate::channel::dbr_data::DbrData;
 use crate::channel::monitor::MonitorDataType;
 use crate::channel::monitor::MonitorState;
 use crate::context::context::create_context;
@@ -100,7 +102,7 @@ async fn main() {
     // channel.get(channel::dbr::DbrType::StsDouble, 1).await;
     // channel1.get(Some(5.0), None, None, None).await;
 
-    let callback1 = Arc::new(move |channel: &Channel| {
+    let callback1 = Arc::new(move |cid: u32, data_type: DbrType, data_count: u32, dbr_data: &DbrData| {
         // println!(">> {}", channel.name());
         // debug!(
         //     "{} has a new value: {:?}, {}",
@@ -174,7 +176,7 @@ async fn main() {
         let name = format!("val{}", ii);
         // println!("{}", name);
         let channel = context.create_channel(&name);
-        channel.start_to_monitor(Some(MonitorDataType::NativeTime), None, Some(callback));
+        channel.start_to_monitor(Some(MonitorDataType::NativeTime), None, None);
         // println!("-->{}", name);
         // });
     }

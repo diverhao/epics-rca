@@ -35,12 +35,12 @@ pub enum MonitorDataType {
 impl MonitorDataType {
     pub fn resolve(self, channel: &Channel) -> DbrType {
         match self {
-            MonitorDataType::Exact(dbr_type) => dbr_type,
-            MonitorDataType::Native => channel.dbr_type_native(),
-            MonitorDataType::NativeSts => channel.dbr_type_native_as_sts(),
-            MonitorDataType::NativeTime => channel.dbr_type_native_as_time(),
-            MonitorDataType::NativeGr => channel.dbr_type_native_as_gr(),
-            MonitorDataType::NativeCtrl => channel.dbr_type_native_as_ctrl(),
+            MonitorDataType::Exact(data_type) => data_type,
+            MonitorDataType::Native => channel.data_type_native(),
+            MonitorDataType::NativeSts => channel.data_type_native_as_sts(),
+            MonitorDataType::NativeTime => channel.data_type_native_as_time(),
+            MonitorDataType::NativeGr => channel.data_type_native_as_gr(),
+            MonitorDataType::NativeCtrl => channel.data_type_native_as_ctrl(),
         }
     }
 }
@@ -231,7 +231,7 @@ impl Channel {
         let data_count = user_config_data_count.unwrap_or_else(|| self.data_count_native());
         let data_type = user_config_data_type
             .map(|data_type| data_type.resolve(self))
-            .unwrap_or_else(|| self.dbr_type_native());
+            .unwrap_or_else(|| self.data_type_native());
 
         {
             let mut monitor = self.monitor_mut();
@@ -239,7 +239,7 @@ impl Channel {
             monitor.set_data_type(data_type);
         }
 
-        let dbr_type = self.monitor().data_type();
+        let data_type = self.monitor().data_type();
         let data_count = self.monitor().data_count();
         let sid = self.sid();
         let subid = self.cid();
@@ -249,7 +249,7 @@ impl Channel {
         };
         let context = get_context();
 
-        let msg: CaMsg = CaMsg::build_event_add(dbr_type, data_count, sid, subid, &vec![dest]);
+        let msg: CaMsg = CaMsg::build_event_add(data_type, data_count, sid, subid, &vec![dest]);
         let tcp = match context.tcps().tcp(&dest) {
             Some(tcp) => tcp,
             None => return,
@@ -280,13 +280,13 @@ impl Channel {
 
         self.monitor_mut().set_state(MonitorState::NotRunning);
 
-        let dbr_type = self.monitor_data_type();
+        let data_type = self.monitor_data_type();
         let data_count = self.monitor_data_count();
         let context = get_context();
         match dest {
             Some(dest) => {
                 let msg: CaMsg =
-                    CaMsg::build_event_cancel(dbr_type, data_count, sid, subid, &vec![dest]);
+                    CaMsg::build_event_cancel(data_type, data_count, sid, subid, &vec![dest]);
                 let tcp: Option<Arc<crate::tcp::tcp::TCP>> = context.tcps().tcp(&dest);
                 match tcp {
                     Some(tcp) => {

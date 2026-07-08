@@ -22,7 +22,7 @@ pub struct ChannelIo {
     pub cid: u32,
     pub callback: Option<ChannelCallback>,
     // user requested
-    pub dbr_type: Option<MonitorDataType>,
+    pub data_type: Option<MonitorDataType>,
     pub data_count: Option<u32>,
 }
 
@@ -123,7 +123,7 @@ impl Channels {
         self: &Self,
         ioid: u32,
         cid: u32,
-        dbr_type: Option<MonitorDataType>,
+        data_type: Option<MonitorDataType>,
         data_count: Option<u32>,
         callback: Option<ChannelCallback>,
     ) {
@@ -131,7 +131,7 @@ impl Channels {
             ioid,
             ChannelIo {
                 cid,
-                dbr_type,
+                data_type,
                 data_count,
                 callback,
             },

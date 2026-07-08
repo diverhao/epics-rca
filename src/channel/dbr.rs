@@ -1,4 +1,8 @@
 use crate::channel::channel::Channel;
+use crate::channel::dbr_data::{
+    CtrlData, CtrlEnumData, CtrlPrecisionData, DbrData, GrData, GrEnumData, GrPrecisionData,
+    PlainData, StsAckStringData, StsData, TimeData,
+};
 use std::sync::Arc;
 
 const DBR_STS_STRING_VALUE_OFFSET: u32 = 4;
@@ -278,652 +282,664 @@ impl DbrType {
     }
 }
 
-impl Channel {
-    pub fn update_value(&self, buf: &Vec<u8>, num_elem: u32, typ: DbrType) {
-        // update Channel.meta
-        match typ {
-            DbrType::StsString
-            | DbrType::StsShort
-            | DbrType::StsFloat
-            | DbrType::StsEnum
-            | DbrType::StsChar
-            | DbrType::StsLong
-            | DbrType::StsDouble
-            | DbrType::StsAckString
-            | DbrType::GrString
-            | DbrType::CtrlString => self.update_sts_meta_from_buf(buf),
-            DbrType::TimeString
-            | DbrType::TimeShort
-            | DbrType::TimeFloat
-            | DbrType::TimeEnum
-            | DbrType::TimeChar
-            | DbrType::TimeLong
-            | DbrType::TimeDouble => self.update_time_meta_from_buf(buf),
-            DbrType::GrShort => self.update_gr_short_meta_from_buf(buf),
-            DbrType::CtrlShort => self.update_ctrl_int_meta_from_buf(buf),
-            DbrType::GrFloat => self.update_gr_float_meta_from_buf(buf),
-            DbrType::CtrlFloat => self.update_ctrl_float_meta_from_buf(buf),
-            DbrType::CtrlEnum | DbrType::GrEnum => self.update_gr_enum_meta_from_buf(buf),
-            DbrType::GrChar => self.update_gr_char_meta_from_buf(buf),
-            DbrType::CtrlChar => self.update_ctrl_char_meta_from_buf(buf),
-            DbrType::GrLong => self.update_gr_long_meta_from_buf(buf),
-            DbrType::CtrlLong => self.update_ctrl_long_meta_from_buf(buf),
-            DbrType::GrDouble => self.update_gr_double_meta_from_buf(buf),
-            DbrType::CtrlDouble => self.update_ctrl_double_meta_from_buf(buf),
-            _ => {}
-        }
-
-        // update Channel.value
-        let value = match typ {
-            DbrType::String => Self::buf_to_string(buf, 0, num_elem),
-            DbrType::Short => Self::buf_to_short(buf, 0, num_elem),
-            DbrType::Float => Self::buf_to_float(buf, 0, num_elem),
-            DbrType::Enum => Self::buf_to_enum(buf, 0, num_elem),
-            DbrType::Char => Self::buf_to_char(buf, 0, num_elem),
-            DbrType::Long => Self::buf_to_long(buf, 0, num_elem),
-            DbrType::Double => Self::buf_to_double(buf, 0, num_elem),
-            DbrType::StsString => Self::buf_to_string(buf, DBR_STS_STRING_VALUE_OFFSET, num_elem),
-            DbrType::StsShort => Self::buf_to_short(buf, DBR_STS_SHORT_VALUE_OFFSET, num_elem),
-            DbrType::StsFloat => Self::buf_to_float(buf, DBR_STS_FLOAT_VALUE_OFFSET, num_elem),
-            DbrType::StsEnum => Self::buf_to_enum(buf, DBR_STS_ENUM_VALUE_OFFSET, num_elem),
-            DbrType::StsChar => Self::buf_to_char(buf, DBR_STS_CHAR_VALUE_OFFSET, num_elem),
-            DbrType::StsLong => Self::buf_to_long(buf, DBR_STS_LONG_VALUE_OFFSET, num_elem),
-            DbrType::StsDouble => Self::buf_to_double(buf, DBR_STS_DOUBLE_VALUE_OFFSET, num_elem),
-            DbrType::TimeString => Self::buf_to_string(buf, DBR_TIME_STRING_VALUE_OFFSET, num_elem),
-            DbrType::TimeShort => Self::buf_to_short(buf, DBR_TIME_SHORT_VALUE_OFFSET, num_elem),
-            DbrType::TimeFloat => Self::buf_to_float(buf, DBR_TIME_FLOAT_VALUE_OFFSET, num_elem),
-            DbrType::TimeEnum => Self::buf_to_enum(buf, DBR_TIME_ENUM_VALUE_OFFSET, num_elem),
-            DbrType::TimeChar => Self::buf_to_char(buf, DBR_TIME_CHAR_VALUE_OFFSET, num_elem),
-            DbrType::TimeLong => Self::buf_to_long(buf, DBR_TIME_LONG_VALUE_OFFSET, num_elem),
-            DbrType::TimeDouble => Self::buf_to_double(buf, DBR_TIME_DOUBLE_VALUE_OFFSET, num_elem),
-            DbrType::GrString => Self::buf_to_string(buf, DBR_GR_STRING_VALUE_OFFSET, num_elem),
-            DbrType::GrShort => Self::buf_to_short(buf, DBR_GR_SHORT_VALUE_OFFSET, num_elem),
-            DbrType::GrFloat => Self::buf_to_float(buf, DBR_GR_FLOAT_VALUE_OFFSET, num_elem),
-            DbrType::GrEnum => Self::buf_to_enum(buf, DBR_GR_ENUM_VALUE_OFFSET, num_elem),
-            DbrType::GrChar => Self::buf_to_char(buf, DBR_GR_CHAR_VALUE_OFFSET, num_elem),
-            DbrType::GrLong => Self::buf_to_long(buf, DBR_GR_LONG_VALUE_OFFSET, num_elem),
-            DbrType::GrDouble => Self::buf_to_double(buf, DBR_GR_DOUBLE_VALUE_OFFSET, num_elem),
-            DbrType::CtrlString => Self::buf_to_string(buf, DBR_CTRL_STRING_VALUE_OFFSET, num_elem),
-            DbrType::CtrlShort => Self::buf_to_short(buf, DBR_CTRL_SHORT_VALUE_OFFSET, num_elem),
-            DbrType::CtrlFloat => Self::buf_to_float(buf, DBR_CTRL_FLOAT_VALUE_OFFSET, num_elem),
-            DbrType::CtrlEnum => Self::buf_to_enum(buf, DBR_CTRL_ENUM_VALUE_OFFSET, num_elem),
-            DbrType::CtrlChar => Self::buf_to_char(buf, DBR_CTRL_CHAR_VALUE_OFFSET, num_elem),
-            DbrType::CtrlLong => Self::buf_to_long(buf, DBR_CTRL_LONG_VALUE_OFFSET, num_elem),
-            DbrType::CtrlDouble => Self::buf_to_double(buf, DBR_CTRL_DOUBLE_VALUE_OFFSET, num_elem),
-            DbrType::PutAckt => Self::buf_to_enum(buf, 0, num_elem),
-            DbrType::PutAcks => Self::buf_to_enum(buf, 0, num_elem),
-            DbrType::StsAckString => {
-                Self::buf_to_string(buf, DBR_STSACK_STRING_VALUE_OFFSET, num_elem)
-            }
-            DbrType::ClassName => Self::buf_to_string(buf, 0, num_elem),
-        };
-
-        if let Ok(value) = value {
-            self.set_value(Some(value));
-        } else {
-            self.set_value(None);
+impl DbrData {
+    pub fn from_buf(buf: &Vec<u8>, data_type: DbrType, data_count: u32) -> Result<Self, String> {
+        match data_type {
+            DbrType::String => Ok(DbrData::String(PlainData {
+                value: Self::parse_string(&buf, 0, data_count)?,
+            })),
+            DbrType::Short => Ok(DbrData::Short(PlainData {
+                value: Self::parse_i16(&buf, 0, data_count)?,
+            })),
+            DbrType::Float => Ok(DbrData::Float(PlainData {
+                value: Self::parse_f32(&buf, 0, data_count)?,
+            })),
+            DbrType::Enum => Ok(DbrData::Enum(PlainData {
+                value: Self::parse_u16(&buf, 0, data_count)?,
+            })),
+            DbrType::Char => Ok(DbrData::Char(PlainData {
+                value: Self::parse_u8(&buf, 0, data_count)?,
+            })),
+            DbrType::Long => Ok(DbrData::Long(PlainData {
+                value: Self::parse_i32(&buf, 0, data_count)?,
+            })),
+            DbrType::Double => Ok(DbrData::Double(PlainData {
+                value: Self::parse_f64(&buf, 0, data_count)?,
+            })),
+            DbrType::StsString => Ok(DbrData::StsString(Self::sts_data(
+                &buf,
+                Self::parse_string(&buf, DBR_STS_STRING_VALUE_OFFSET as usize, data_count)?,
+            )?)),
+            DbrType::StsShort => Ok(DbrData::StsShort(Self::sts_data(
+                &buf,
+                Self::parse_i16(&buf, DBR_STS_SHORT_VALUE_OFFSET as usize, data_count)?,
+            )?)),
+            DbrType::StsFloat => Ok(DbrData::StsFloat(Self::sts_data(
+                &buf,
+                Self::parse_f32(&buf, DBR_STS_FLOAT_VALUE_OFFSET as usize, data_count)?,
+            )?)),
+            DbrType::StsEnum => Ok(DbrData::StsEnum(Self::sts_data(
+                &buf,
+                Self::parse_u16(&buf, DBR_STS_ENUM_VALUE_OFFSET as usize, data_count)?,
+            )?)),
+            DbrType::StsChar => Ok(DbrData::StsChar(Self::sts_data(
+                &buf,
+                Self::parse_u8(&buf, DBR_STS_CHAR_VALUE_OFFSET as usize, data_count)?,
+            )?)),
+            DbrType::StsLong => Ok(DbrData::StsLong(Self::sts_data(
+                &buf,
+                Self::parse_i32(&buf, DBR_STS_LONG_VALUE_OFFSET as usize, data_count)?,
+            )?)),
+            DbrType::StsDouble => Ok(DbrData::StsDouble(Self::sts_data(
+                &buf,
+                Self::parse_f64(&buf, DBR_STS_DOUBLE_VALUE_OFFSET as usize, data_count)?,
+            )?)),
+            DbrType::TimeString => Ok(DbrData::TimeString(Self::time_data(
+                &buf,
+                Self::parse_string(&buf, DBR_TIME_STRING_VALUE_OFFSET as usize, data_count)?,
+            )?)),
+            DbrType::TimeShort => Ok(DbrData::TimeShort(Self::time_data(
+                &buf,
+                Self::parse_i16(&buf, DBR_TIME_SHORT_VALUE_OFFSET as usize, data_count)?,
+            )?)),
+            DbrType::TimeFloat => Ok(DbrData::TimeFloat(Self::time_data(
+                &buf,
+                Self::parse_f32(&buf, DBR_TIME_FLOAT_VALUE_OFFSET as usize, data_count)?,
+            )?)),
+            DbrType::TimeEnum => Ok(DbrData::TimeEnum(Self::time_data(
+                &buf,
+                Self::parse_u16(&buf, DBR_TIME_ENUM_VALUE_OFFSET as usize, data_count)?,
+            )?)),
+            DbrType::TimeChar => Ok(DbrData::TimeChar(Self::time_data(
+                &buf,
+                Self::parse_u8(&buf, DBR_TIME_CHAR_VALUE_OFFSET as usize, data_count)?,
+            )?)),
+            DbrType::TimeLong => Ok(DbrData::TimeLong(Self::time_data(
+                &buf,
+                Self::parse_i32(&buf, DBR_TIME_LONG_VALUE_OFFSET as usize, data_count)?,
+            )?)),
+            DbrType::TimeDouble => Ok(DbrData::TimeDouble(Self::time_data(
+                &buf,
+                Self::parse_f64(&buf, DBR_TIME_DOUBLE_VALUE_OFFSET as usize, data_count)?,
+            )?)),
+            DbrType::GrString => Ok(DbrData::GrString(Self::sts_data(
+                &buf,
+                Self::parse_string(&buf, DBR_GR_STRING_VALUE_OFFSET as usize, data_count)?,
+            )?)),
+            DbrType::GrShort => Ok(DbrData::GrShort(Self::gr_i16_data(
+                &buf,
+                DBR_GR_SHORT_VALUE_OFFSET as usize,
+                data_count,
+            )?)),
+            DbrType::GrFloat => Ok(DbrData::GrFloat(Self::gr_f32_data(
+                &buf,
+                DBR_GR_FLOAT_VALUE_OFFSET as usize,
+                data_count,
+            )?)),
+            DbrType::GrEnum => Ok(DbrData::GrEnum(Self::gr_enum_data(
+                &buf,
+                DBR_GR_ENUM_VALUE_OFFSET as usize,
+                data_count,
+            )?)),
+            DbrType::GrChar => Ok(DbrData::GrChar(Self::gr_u8_data(
+                &buf,
+                DBR_GR_CHAR_VALUE_OFFSET as usize,
+                data_count,
+            )?)),
+            DbrType::GrLong => Ok(DbrData::GrLong(Self::gr_i32_data(
+                &buf,
+                DBR_GR_LONG_VALUE_OFFSET as usize,
+                data_count,
+            )?)),
+            DbrType::GrDouble => Ok(DbrData::GrDouble(Self::gr_f64_data(
+                &buf,
+                DBR_GR_DOUBLE_VALUE_OFFSET as usize,
+                data_count,
+            )?)),
+            DbrType::CtrlString => Ok(DbrData::CtrlString(Self::sts_data(
+                &buf,
+                Self::parse_string(&buf, DBR_CTRL_STRING_VALUE_OFFSET as usize, data_count)?,
+            )?)),
+            DbrType::CtrlShort => Ok(DbrData::CtrlShort(Self::ctrl_i16_data(
+                &buf,
+                DBR_CTRL_SHORT_VALUE_OFFSET as usize,
+                data_count,
+            )?)),
+            DbrType::CtrlFloat => Ok(DbrData::CtrlFloat(Self::ctrl_f32_data(
+                &buf,
+                DBR_CTRL_FLOAT_VALUE_OFFSET as usize,
+                data_count,
+            )?)),
+            DbrType::CtrlEnum => Ok(DbrData::CtrlEnum(Self::ctrl_enum_data(
+                &buf,
+                DBR_CTRL_ENUM_VALUE_OFFSET as usize,
+                data_count,
+            )?)),
+            DbrType::CtrlChar => Ok(DbrData::CtrlChar(Self::ctrl_u8_data(
+                &buf,
+                DBR_CTRL_CHAR_VALUE_OFFSET as usize,
+                data_count,
+            )?)),
+            DbrType::CtrlLong => Ok(DbrData::CtrlLong(Self::ctrl_i32_data(
+                &buf,
+                DBR_CTRL_LONG_VALUE_OFFSET as usize,
+                data_count,
+            )?)),
+            DbrType::CtrlDouble => Ok(DbrData::CtrlDouble(Self::ctrl_f64_data(
+                &buf,
+                DBR_CTRL_DOUBLE_VALUE_OFFSET as usize,
+                data_count,
+            )?)),
+            DbrType::PutAckt => Ok(DbrData::PutAckt(PlainData {
+                value: Self::parse_u16(&buf, 0, data_count)?,
+            })),
+            DbrType::PutAcks => Ok(DbrData::PutAcks(PlainData {
+                value: Self::parse_u16(&buf, 0, data_count)?,
+            })),
+            DbrType::StsAckString => Ok(DbrData::StsAckString(Self::sts_ack_string_data(
+                &buf,
+                Self::parse_string(&buf, DBR_STSACK_STRING_VALUE_OFFSET as usize, data_count)?,
+            )?)),
+            DbrType::ClassName => Ok(DbrData::ClassName(PlainData {
+                value: Self::parse_string(&buf, 0, data_count)?,
+            })),
         }
     }
 
-    // ------------------- value ---------------
+    pub fn from_buf_u16(buf: &Vec<u8>, data_type: u16, data_count: u32) -> Result<Self, String> {
+        let data_type =
+            DbrType::from_u16(data_type).ok_or_else(|| format!("Invalid DBR type {data_type}"))?;
+        Self::from_buf(&buf, data_type, data_count)
+    }
 
     fn value_range(
-        buf: &Vec<u8>,
-        start: u32,
-        num_elem: u32,
+        buf: &[u8],
+        start: usize,
+        data_count: u32,
         elem_size: usize,
     ) -> Result<std::ops::Range<usize>, String> {
-        let start = start as usize;
-        let num_elem = usize::try_from(num_elem).map_err(|_| "Element count too large")?;
-        let len = num_elem
+        let data_count =
+            usize::try_from(data_count).map_err(|_| "Element count too large".to_string())?;
+        let len = data_count
             .checked_mul(elem_size)
-            .ok_or("Buffer length overflow")?;
-        let end = start.checked_add(len).ok_or("Buffer length overflow")?;
+            .ok_or_else(|| "Buffer length overflow".to_string())?;
+        let end = start
+            .checked_add(len)
+            .ok_or_else(|| "Buffer length overflow".to_string())?;
+
         if buf.len() < end {
-            return Err("Buffer length too short".to_string());
+            return Err(format!(
+                "Buffer length too short: need {end} bytes, got {}",
+                buf.len()
+            ));
         }
 
         Ok(start..end)
     }
 
-    fn buf_to_string(buf: &Vec<u8>, start: u32, num_elem: u32) -> Result<DbrValue, String> {
+    fn fixed_c_string(buf: &[u8]) -> Result<String, String> {
+        let end = buf.iter().position(|&byte| byte == 0).unwrap_or(buf.len());
+        std::str::from_utf8(&buf[..end])
+            .map(str::to_string)
+            .map_err(|_| "Buffer contains invalid UTF-8".to_string())
+    }
+
+    fn parse_string(buf: &[u8], start: usize, data_count: u32) -> Result<Arc<Vec<String>>, String> {
         const DBR_STRING_SIZE: usize = 40;
+        let range = Self::value_range(buf, start, data_count, DBR_STRING_SIZE)?;
 
-        let range = Self::value_range(buf, start, num_elem, DBR_STRING_SIZE)?;
-
-        let mut strings = Vec::with_capacity(range.len() / DBR_STRING_SIZE);
+        let mut values = Vec::with_capacity(range.len() / DBR_STRING_SIZE);
         for chunk in buf[range].chunks_exact(DBR_STRING_SIZE) {
-            let Some(string) = Self::fixed_c_string(chunk) else {
-                return Err("Buffer contains invalid UTF-8".to_string());
-            };
-            strings.push(string);
+            values.push(Self::fixed_c_string(chunk)?);
         }
-
-        Ok(DbrValue::String(Arc::new(strings)))
+        Ok(Arc::new(values))
     }
 
-    fn buf_to_short(buf: &Vec<u8>, start: u32, num_elem: u32) -> Result<DbrValue, String> {
-        let range = Self::value_range(buf, start, num_elem, 2)?;
-
-        let mut shorts = Vec::with_capacity(range.len() / 2);
+    fn parse_i16(buf: &[u8], start: usize, data_count: u32) -> Result<Arc<Vec<i16>>, String> {
+        let range = Self::value_range(buf, start, data_count, 2)?;
+        let mut values = Vec::with_capacity(range.len() / 2);
         for chunk in buf[range].chunks_exact(2) {
-            shorts.push(i16::from_be_bytes([chunk[0], chunk[1]]));
+            values.push(i16::from_be_bytes([chunk[0], chunk[1]]));
         }
-
-        Ok(DbrValue::Short(Arc::new(shorts)))
+        Ok(Arc::new(values))
     }
 
-    fn buf_to_float(buf: &Vec<u8>, start: u32, num_elem: u32) -> Result<DbrValue, String> {
-        let range = Self::value_range(buf, start, num_elem, 4)?;
-
-        let mut floats = Vec::with_capacity(range.len() / 4);
-        for chunk in buf[range].chunks_exact(4) {
-            floats.push(f32::from_be_bytes([chunk[0], chunk[1], chunk[2], chunk[3]]));
-        }
-
-        Ok(DbrValue::Float(Arc::new(floats)))
-    }
-
-    fn buf_to_enum(buf: &Vec<u8>, start: u32, num_elem: u32) -> Result<DbrValue, String> {
-        let range = Self::value_range(buf, start, num_elem, 2)?;
-
-        let mut enums = Vec::with_capacity(range.len() / 2);
+    fn parse_u16(buf: &[u8], start: usize, data_count: u32) -> Result<Arc<Vec<u16>>, String> {
+        let range = Self::value_range(buf, start, data_count, 2)?;
+        let mut values = Vec::with_capacity(range.len() / 2);
         for chunk in buf[range].chunks_exact(2) {
-            enums.push(u16::from_be_bytes([chunk[0], chunk[1]]));
+            values.push(u16::from_be_bytes([chunk[0], chunk[1]]));
         }
-
-        Ok(DbrValue::Enum(Arc::new(enums)))
+        Ok(Arc::new(values))
     }
 
-    fn buf_to_char(buf: &Vec<u8>, start: u32, num_elem: u32) -> Result<DbrValue, String> {
-        let range = Self::value_range(buf, start, num_elem, 1)?;
-
-        Ok(DbrValue::Char(Arc::new(buf[range].to_vec())))
-    }
-
-    fn buf_to_long(buf: &Vec<u8>, start: u32, num_elem: u32) -> Result<DbrValue, String> {
-        let range = Self::value_range(buf, start, num_elem, 4)?;
-
-        let mut longs = Vec::with_capacity(range.len() / 4);
+    fn parse_f32(buf: &[u8], start: usize, data_count: u32) -> Result<Arc<Vec<f32>>, String> {
+        let range = Self::value_range(buf, start, data_count, 4)?;
+        let mut values = Vec::with_capacity(range.len() / 4);
         for chunk in buf[range].chunks_exact(4) {
-            longs.push(i32::from_be_bytes([chunk[0], chunk[1], chunk[2], chunk[3]]));
+            values.push(f32::from_be_bytes([chunk[0], chunk[1], chunk[2], chunk[3]]));
         }
-
-        Ok(DbrValue::Long(Arc::new(longs)))
+        Ok(Arc::new(values))
     }
 
-    fn buf_to_double(buf: &Vec<u8>, start: u32, num_elem: u32) -> Result<DbrValue, String> {
-        let range = Self::value_range(buf, start, num_elem, 8)?;
+    fn parse_u8(buf: &[u8], start: usize, data_count: u32) -> Result<Arc<Vec<u8>>, String> {
+        let range = Self::value_range(buf, start, data_count, 1)?;
+        Ok(Arc::new(buf[range].to_vec()))
+    }
 
-        let mut doubles = Vec::with_capacity(range.len() / 8);
+    fn parse_i32(buf: &[u8], start: usize, data_count: u32) -> Result<Arc<Vec<i32>>, String> {
+        let range = Self::value_range(buf, start, data_count, 4)?;
+        let mut values = Vec::with_capacity(range.len() / 4);
+        for chunk in buf[range].chunks_exact(4) {
+            values.push(i32::from_be_bytes([chunk[0], chunk[1], chunk[2], chunk[3]]));
+        }
+        Ok(Arc::new(values))
+    }
+
+    fn parse_f64(buf: &[u8], start: usize, data_count: u32) -> Result<Arc<Vec<f64>>, String> {
+        let range = Self::value_range(buf, start, data_count, 8)?;
+        let mut values = Vec::with_capacity(range.len() / 8);
         for chunk in buf[range].chunks_exact(8) {
-            doubles.push(f64::from_be_bytes([
+            values.push(f64::from_be_bytes([
                 chunk[0], chunk[1], chunk[2], chunk[3], chunk[4], chunk[5], chunk[6], chunk[7],
             ]));
         }
-
-        Ok(DbrValue::Double(Arc::new(doubles)))
+        Ok(Arc::new(values))
     }
 
-    // ------------------- meta ----------------
-
-    fn fixed_c_string(buf: &[u8]) -> Option<String> {
-        let end = buf.iter().position(|&b| b == 0).unwrap_or(buf.len());
-        std::str::from_utf8(&buf[..end]).ok().map(str::to_string)
-    }
-
-    fn update_sts_meta_from_buf(&self, buf: &Vec<u8>) {
-        if buf.len() < 4 {
-            return;
+    fn require_len(buf: &[u8], len: usize) -> Result<(), String> {
+        if buf.len() < len {
+            return Err(format!(
+                "Buffer length too short: need {len} bytes, got {}",
+                buf.len()
+            ));
         }
-
-        let status_code = i16::from_be_bytes([buf[0], buf[1]]);
-        let severity_code = i16::from_be_bytes([buf[2], buf[3]]);
-
-        let Some(status) = ChannelStatus::from_i16(status_code) else {
-            return;
-        };
-        let Some(severity) = ChannelSeverity::from_i16(severity_code) else {
-            return;
-        };
-
-        self.set_status(status);
-        self.set_severity(severity);
+        Ok(())
     }
 
-    fn update_time_meta_from_buf(&self, buf: &Vec<u8>) {
+    fn i16_at(buf: &[u8], offset: usize) -> Result<i16, String> {
+        Self::require_len(buf, offset + 2)?;
+        Ok(i16::from_be_bytes([buf[offset], buf[offset + 1]]))
+    }
+
+    fn u16_at(buf: &[u8], offset: usize) -> Result<u16, String> {
+        Self::require_len(buf, offset + 2)?;
+        Ok(u16::from_be_bytes([buf[offset], buf[offset + 1]]))
+    }
+
+    fn i32_at(buf: &[u8], offset: usize) -> Result<i32, String> {
+        Self::require_len(buf, offset + 4)?;
+        Ok(i32::from_be_bytes([
+            buf[offset],
+            buf[offset + 1],
+            buf[offset + 2],
+            buf[offset + 3],
+        ]))
+    }
+
+    fn u32_at(buf: &[u8], offset: usize) -> Result<u32, String> {
+        Self::require_len(buf, offset + 4)?;
+        Ok(u32::from_be_bytes([
+            buf[offset],
+            buf[offset + 1],
+            buf[offset + 2],
+            buf[offset + 3],
+        ]))
+    }
+
+    fn f32_at(buf: &[u8], offset: usize) -> Result<f32, String> {
+        Self::require_len(buf, offset + 4)?;
+        Ok(f32::from_be_bytes([
+            buf[offset],
+            buf[offset + 1],
+            buf[offset + 2],
+            buf[offset + 3],
+        ]))
+    }
+
+    fn f64_at(buf: &[u8], offset: usize) -> Result<f64, String> {
+        Self::require_len(buf, offset + 8)?;
+        Ok(f64::from_be_bytes([
+            buf[offset],
+            buf[offset + 1],
+            buf[offset + 2],
+            buf[offset + 3],
+            buf[offset + 4],
+            buf[offset + 5],
+            buf[offset + 6],
+            buf[offset + 7],
+        ]))
+    }
+
+    fn alarm(buf: &[u8]) -> Result<(ChannelStatus, ChannelSeverity), String> {
+        let status = ChannelStatus::from_i16(Self::i16_at(buf, 0)?)
+            .ok_or_else(|| "Invalid DBR alarm status".to_string())?;
+        let severity = ChannelSeverity::from_i16(Self::i16_at(buf, 2)?)
+            .ok_or_else(|| "Invalid DBR alarm severity".to_string())?;
+        Ok((status, severity))
+    }
+
+    fn sts_data<T>(buf: &[u8], value: Arc<Vec<T>>) -> Result<StsData<T>, String> {
+        let (status, severity) = Self::alarm(buf)?;
+        Ok(StsData {
+            value,
+            status,
+            severity,
+        })
+    }
+
+    fn sts_ack_string_data(
+        buf: &[u8],
+        value: Arc<Vec<String>>,
+    ) -> Result<StsAckStringData, String> {
+        let (status, severity) = Self::alarm(buf)?;
+        Ok(StsAckStringData {
+            value,
+            status,
+            severity,
+            ackt: Some(Self::u16_at(buf, 4)?),
+            acks: Some(Self::u16_at(buf, 6)?),
+        })
+    }
+
+    fn time_data<T>(buf: &[u8], value: Arc<Vec<T>>) -> Result<TimeData<T>, String> {
         const POSIX_TIME_AT_EPICS_EPOCH: u32 = 631_152_000;
 
-        if buf.len() < 12 {
-            return;
-        }
-
-        let status_code = i16::from_be_bytes([buf[0], buf[1]]);
-        let severity_code = i16::from_be_bytes([buf[2], buf[3]]);
-
-        let Some(status) = ChannelStatus::from_i16(status_code) else {
-            return;
-        };
-        let Some(severity) = ChannelSeverity::from_i16(severity_code) else {
-            return;
-        };
-
-        let Some(seconds_since_epoch) = u32::from_be_bytes([buf[4], buf[5], buf[6], buf[7]])
+        let (status, severity) = Self::alarm(buf)?;
+        let seconds_since_epoch = Self::u32_at(buf, 4)?
             .checked_add(POSIX_TIME_AT_EPICS_EPOCH)
             .and_then(|seconds| i32::try_from(seconds).ok())
-        else {
-            return;
-        };
-        let nano_seconds = u32::from_be_bytes([buf[8], buf[9], buf[10], buf[11]]);
+            .ok_or_else(|| "DBR timestamp out of range".to_string())?;
+        let nano_seconds = Self::u32_at(buf, 8)?;
 
-        self.set_status(status);
-        self.set_severity(severity);
-        self.set_seconds_since_epoch(seconds_since_epoch);
-        self.set_nano_seconds(nano_seconds);
+        Ok(TimeData {
+            value,
+            status,
+            severity,
+            seconds_since_epoch,
+            nano_seconds,
+        })
     }
 
-    fn update_gr_short_meta_from_buf(&self, buf: &Vec<u8>) {
-        if buf.len() < DBR_GR_SHORT_VALUE_OFFSET as usize {
-            return;
-        }
-
-        let status_code = i16::from_be_bytes([buf[0], buf[1]]);
-        let severity_code = i16::from_be_bytes([buf[2], buf[3]]);
-
-        let Some(status) = ChannelStatus::from_i16(status_code) else {
-            return;
-        };
-        let Some(severity) = ChannelSeverity::from_i16(severity_code) else {
-            return;
-        };
-
-        let Some(units) = Self::fixed_c_string(&buf[4..12]) else {
-            return;
-        };
-
-        self.set_status(status);
-        self.set_severity(severity);
-        self.set_units(units);
-        self.set_upper_display_limit(i16::from_be_bytes([buf[12], buf[13]]));
-        self.set_lower_display_limit(i16::from_be_bytes([buf[14], buf[15]]));
-        self.set_upper_alarm_limit(i16::from_be_bytes([buf[16], buf[17]]));
-        self.set_upper_warning_limit(i16::from_be_bytes([buf[18], buf[19]]));
-        self.set_lower_warning_limit(i16::from_be_bytes([buf[20], buf[21]]));
-        self.set_lower_alarm_limit(i16::from_be_bytes([buf[22], buf[23]]));
+    fn gr_i16_data(
+        buf: &[u8],
+        value_offset: usize,
+        data_count: u32,
+    ) -> Result<GrData<i16>, String> {
+        let (status, severity) = Self::alarm(buf)?;
+        Ok(GrData {
+            value: Self::parse_i16(buf, value_offset, data_count)?,
+            status,
+            severity,
+            units: Self::fixed_c_string(Self::range(buf, 4, 12)?)?,
+            upper_display_limit: Self::i16_at(buf, 12)?,
+            lower_display_limit: Self::i16_at(buf, 14)?,
+            upper_alarm_limit: Self::i16_at(buf, 16)?,
+            upper_warning_limit: Self::i16_at(buf, 18)?,
+            lower_warning_limit: Self::i16_at(buf, 20)?,
+            lower_alarm_limit: Self::i16_at(buf, 22)?,
+        })
     }
 
-    fn update_gr_float_meta_from_buf(&self, buf: &Vec<u8>) {
-        if buf.len() < DBR_GR_FLOAT_VALUE_OFFSET as usize {
-            return;
-        }
-
-        let status_code = i16::from_be_bytes([buf[0], buf[1]]);
-        let severity_code = i16::from_be_bytes([buf[2], buf[3]]);
-
-        let Some(status) = ChannelStatus::from_i16(status_code) else {
-            return;
-        };
-        let Some(severity) = ChannelSeverity::from_i16(severity_code) else {
-            return;
-        };
-
-        let Some(units) = Self::fixed_c_string(&buf[8..16]) else {
-            return;
-        };
-
-        self.set_status(status);
-        self.set_severity(severity);
-        self.set_precision(i16::from_be_bytes([buf[4], buf[5]]));
-        self.set_padding(i16::from_be_bytes([buf[6], buf[7]]));
-        self.set_units(units);
-        self.set_upper_display_limit(
-            f32::from_be_bytes([buf[16], buf[17], buf[18], buf[19]]) as i16
-        );
-        self.set_lower_display_limit(
-            f32::from_be_bytes([buf[20], buf[21], buf[22], buf[23]]) as i16
-        );
-        self.set_upper_alarm_limit(f32::from_be_bytes([buf[24], buf[25], buf[26], buf[27]]) as i16);
-        self.set_upper_warning_limit(
-            f32::from_be_bytes([buf[28], buf[29], buf[30], buf[31]]) as i16
-        );
-        self.set_lower_warning_limit(
-            f32::from_be_bytes([buf[32], buf[33], buf[34], buf[35]]) as i16
-        );
-        self.set_lower_alarm_limit(f32::from_be_bytes([buf[36], buf[37], buf[38], buf[39]]) as i16);
+    fn gr_u8_data(buf: &[u8], value_offset: usize, data_count: u32) -> Result<GrData<u8>, String> {
+        let (status, severity) = Self::alarm(buf)?;
+        Self::require_len(buf, value_offset)?;
+        Ok(GrData {
+            value: Self::parse_u8(buf, value_offset, data_count)?,
+            status,
+            severity,
+            units: Self::fixed_c_string(Self::range(buf, 4, 12)?)?,
+            upper_display_limit: buf[12] as i16,
+            lower_display_limit: buf[13] as i16,
+            upper_alarm_limit: buf[14] as i16,
+            upper_warning_limit: buf[15] as i16,
+            lower_warning_limit: buf[16] as i16,
+            lower_alarm_limit: buf[17] as i16,
+        })
     }
 
-    fn update_gr_double_meta_from_buf(&self, buf: &Vec<u8>) {
-        if buf.len() < DBR_GR_DOUBLE_VALUE_OFFSET as usize {
-            return;
-        }
-
-        let status_code = i16::from_be_bytes([buf[0], buf[1]]);
-        let severity_code = i16::from_be_bytes([buf[2], buf[3]]);
-
-        let Some(status) = ChannelStatus::from_i16(status_code) else {
-            return;
-        };
-        let Some(severity) = ChannelSeverity::from_i16(severity_code) else {
-            return;
-        };
-
-        let Some(units) = Self::fixed_c_string(&buf[8..16]) else {
-            return;
-        };
-
-        self.set_status(status);
-        self.set_severity(severity);
-        self.set_precision(i16::from_be_bytes([buf[4], buf[5]]));
-        self.set_padding(i16::from_be_bytes([buf[6], buf[7]]));
-        self.set_units(units);
-        self.set_upper_display_limit(f64::from_be_bytes([
-            buf[16], buf[17], buf[18], buf[19], buf[20], buf[21], buf[22], buf[23],
-        ]) as i16);
-        self.set_lower_display_limit(f64::from_be_bytes([
-            buf[24], buf[25], buf[26], buf[27], buf[28], buf[29], buf[30], buf[31],
-        ]) as i16);
-        self.set_upper_alarm_limit(f64::from_be_bytes([
-            buf[32], buf[33], buf[34], buf[35], buf[36], buf[37], buf[38], buf[39],
-        ]) as i16);
-        self.set_upper_warning_limit(f64::from_be_bytes([
-            buf[40], buf[41], buf[42], buf[43], buf[44], buf[45], buf[46], buf[47],
-        ]) as i16);
-        self.set_lower_warning_limit(f64::from_be_bytes([
-            buf[48], buf[49], buf[50], buf[51], buf[52], buf[53], buf[54], buf[55],
-        ]) as i16);
-        self.set_lower_alarm_limit(f64::from_be_bytes([
-            buf[56], buf[57], buf[58], buf[59], buf[60], buf[61], buf[62], buf[63],
-        ]) as i16);
+    fn gr_i32_data(
+        buf: &[u8],
+        value_offset: usize,
+        data_count: u32,
+    ) -> Result<GrData<i32>, String> {
+        let (status, severity) = Self::alarm(buf)?;
+        Ok(GrData {
+            value: Self::parse_i32(buf, value_offset, data_count)?,
+            status,
+            severity,
+            units: Self::fixed_c_string(Self::range(buf, 4, 12)?)?,
+            upper_display_limit: Self::i32_at(buf, 12)? as i16,
+            lower_display_limit: Self::i32_at(buf, 16)? as i16,
+            upper_alarm_limit: Self::i32_at(buf, 20)? as i16,
+            upper_warning_limit: Self::i32_at(buf, 24)? as i16,
+            lower_warning_limit: Self::i32_at(buf, 28)? as i16,
+            lower_alarm_limit: Self::i32_at(buf, 32)? as i16,
+        })
     }
 
-    fn update_gr_enum_meta_from_buf(&self, buf: &Vec<u8>) {
+    fn gr_f32_data(
+        buf: &[u8],
+        value_offset: usize,
+        data_count: u32,
+    ) -> Result<GrPrecisionData<f32>, String> {
+        let (status, severity) = Self::alarm(buf)?;
+        Ok(GrPrecisionData {
+            value: Self::parse_f32(buf, value_offset, data_count)?,
+            status,
+            severity,
+            precision: Self::i16_at(buf, 4)?,
+            padding: Self::i16_at(buf, 6)?,
+            units: Self::fixed_c_string(Self::range(buf, 8, 16)?)?,
+            upper_display_limit: Self::f32_at(buf, 16)? as i16,
+            lower_display_limit: Self::f32_at(buf, 20)? as i16,
+            upper_alarm_limit: Self::f32_at(buf, 24)? as i16,
+            upper_warning_limit: Self::f32_at(buf, 28)? as i16,
+            lower_warning_limit: Self::f32_at(buf, 32)? as i16,
+            lower_alarm_limit: Self::f32_at(buf, 36)? as i16,
+        })
+    }
+
+    fn gr_f64_data(
+        buf: &[u8],
+        value_offset: usize,
+        data_count: u32,
+    ) -> Result<GrPrecisionData<f64>, String> {
+        let (status, severity) = Self::alarm(buf)?;
+        Ok(GrPrecisionData {
+            value: Self::parse_f64(buf, value_offset, data_count)?,
+            status,
+            severity,
+            precision: Self::i16_at(buf, 4)?,
+            padding: Self::i16_at(buf, 6)?,
+            units: Self::fixed_c_string(Self::range(buf, 8, 16)?)?,
+            upper_display_limit: Self::f64_at(buf, 16)? as i16,
+            lower_display_limit: Self::f64_at(buf, 24)? as i16,
+            upper_alarm_limit: Self::f64_at(buf, 32)? as i16,
+            upper_warning_limit: Self::f64_at(buf, 40)? as i16,
+            lower_warning_limit: Self::f64_at(buf, 48)? as i16,
+            lower_alarm_limit: Self::f64_at(buf, 56)? as i16,
+        })
+    }
+
+    fn gr_enum_data(
+        buf: &[u8],
+        value_offset: usize,
+        data_count: u32,
+    ) -> Result<GrEnumData, String> {
+        let (status, severity) = Self::alarm(buf)?;
+        let (number_of_string_used, strings) = Self::enum_strings(buf)?;
+        Ok(GrEnumData {
+            value: Self::parse_u16(buf, value_offset, data_count)?,
+            status,
+            severity,
+            number_of_string_used,
+            strings,
+        })
+    }
+
+    fn ctrl_i16_data(
+        buf: &[u8],
+        value_offset: usize,
+        data_count: u32,
+    ) -> Result<CtrlData<i16>, String> {
+        let gr = Self::gr_i16_data(buf, value_offset, data_count)?;
+        Ok(CtrlData {
+            value: gr.value,
+            status: gr.status,
+            severity: gr.severity,
+            units: gr.units,
+            upper_display_limit: gr.upper_display_limit,
+            lower_display_limit: gr.lower_display_limit,
+            upper_alarm_limit: gr.upper_alarm_limit,
+            upper_warning_limit: gr.upper_warning_limit,
+            lower_warning_limit: gr.lower_warning_limit,
+            lower_alarm_limit: gr.lower_alarm_limit,
+            upper_control_limit: Some(Self::i16_at(buf, 24)?),
+            lower_control_limit: Some(Self::i16_at(buf, 26)?),
+        })
+    }
+
+    fn ctrl_u8_data(
+        buf: &[u8],
+        value_offset: usize,
+        data_count: u32,
+    ) -> Result<CtrlData<u8>, String> {
+        let gr = Self::gr_u8_data(buf, value_offset, data_count)?;
+        Ok(CtrlData {
+            value: gr.value,
+            status: gr.status,
+            severity: gr.severity,
+            units: gr.units,
+            upper_display_limit: gr.upper_display_limit,
+            lower_display_limit: gr.lower_display_limit,
+            upper_alarm_limit: gr.upper_alarm_limit,
+            upper_warning_limit: gr.upper_warning_limit,
+            lower_warning_limit: gr.lower_warning_limit,
+            lower_alarm_limit: gr.lower_alarm_limit,
+            upper_control_limit: Some(buf[18] as i16),
+            lower_control_limit: Some(buf[19] as i16),
+        })
+    }
+
+    fn ctrl_i32_data(
+        buf: &[u8],
+        value_offset: usize,
+        data_count: u32,
+    ) -> Result<CtrlData<i32>, String> {
+        let gr = Self::gr_i32_data(buf, value_offset, data_count)?;
+        Ok(CtrlData {
+            value: gr.value,
+            status: gr.status,
+            severity: gr.severity,
+            units: gr.units,
+            upper_display_limit: gr.upper_display_limit,
+            lower_display_limit: gr.lower_display_limit,
+            upper_alarm_limit: gr.upper_alarm_limit,
+            upper_warning_limit: gr.upper_warning_limit,
+            lower_warning_limit: gr.lower_warning_limit,
+            lower_alarm_limit: gr.lower_alarm_limit,
+            upper_control_limit: Some(Self::i32_at(buf, 36)? as i16),
+            lower_control_limit: Some(Self::i32_at(buf, 40)? as i16),
+        })
+    }
+
+    fn ctrl_f32_data(
+        buf: &[u8],
+        value_offset: usize,
+        data_count: u32,
+    ) -> Result<CtrlPrecisionData<f32>, String> {
+        let gr = Self::gr_f32_data(buf, value_offset, data_count)?;
+        Ok(CtrlPrecisionData {
+            value: gr.value,
+            status: gr.status,
+            severity: gr.severity,
+            precision: gr.precision,
+            padding: gr.padding,
+            units: gr.units,
+            upper_display_limit: gr.upper_display_limit,
+            lower_display_limit: gr.lower_display_limit,
+            upper_alarm_limit: gr.upper_alarm_limit,
+            upper_warning_limit: gr.upper_warning_limit,
+            lower_warning_limit: gr.lower_warning_limit,
+            lower_alarm_limit: gr.lower_alarm_limit,
+            upper_control_limit: Some(Self::f32_at(buf, 40)? as i16),
+            lower_control_limit: Some(Self::f32_at(buf, 44)? as i16),
+        })
+    }
+
+    fn ctrl_f64_data(
+        buf: &[u8],
+        value_offset: usize,
+        data_count: u32,
+    ) -> Result<CtrlPrecisionData<f64>, String> {
+        let gr = Self::gr_f64_data(buf, value_offset, data_count)?;
+        Ok(CtrlPrecisionData {
+            value: gr.value,
+            status: gr.status,
+            severity: gr.severity,
+            precision: gr.precision,
+            padding: gr.padding,
+            units: gr.units,
+            upper_display_limit: gr.upper_display_limit,
+            lower_display_limit: gr.lower_display_limit,
+            upper_alarm_limit: gr.upper_alarm_limit,
+            upper_warning_limit: gr.upper_warning_limit,
+            lower_warning_limit: gr.lower_warning_limit,
+            lower_alarm_limit: gr.lower_alarm_limit,
+            upper_control_limit: Some(Self::f64_at(buf, 64)? as i16),
+            lower_control_limit: Some(Self::f64_at(buf, 72)? as i16),
+        })
+    }
+
+    fn ctrl_enum_data(
+        buf: &[u8],
+        value_offset: usize,
+        data_count: u32,
+    ) -> Result<CtrlEnumData, String> {
+        let (status, severity) = Self::alarm(buf)?;
+        let (number_of_string_used, strings) = Self::enum_strings(buf)?;
+        Ok(CtrlEnumData {
+            value: Self::parse_u16(buf, value_offset, data_count)?,
+            status,
+            severity,
+            number_of_string_used,
+            strings,
+        })
+    }
+
+    fn enum_strings(buf: &[u8]) -> Result<(i16, Vec<String>), String> {
         const DBR_ENUM_STRING_COUNT: usize = 16;
         const DBR_ENUM_STRING_SIZE: usize = 26;
+        const DBR_ENUM_STRING_START: usize = 6;
 
-        if buf.len() < DBR_GR_ENUM_VALUE_OFFSET as usize {
-            return;
-        }
-
-        let status_code = i16::from_be_bytes([buf[0], buf[1]]);
-        let severity_code = i16::from_be_bytes([buf[2], buf[3]]);
-
-        let Some(status) = ChannelStatus::from_i16(status_code) else {
-            return;
-        };
-        let Some(severity) = ChannelSeverity::from_i16(severity_code) else {
-            return;
-        };
-
-        let number_of_string_used = i16::from_be_bytes([buf[4], buf[5]]);
+        let number_of_string_used = Self::i16_at(buf, 4)?;
         if !(0..=DBR_ENUM_STRING_COUNT as i16).contains(&number_of_string_used) {
-            return;
+            return Err(format!("Invalid enum string count {number_of_string_used}"));
         }
 
+        Self::require_len(buf, DBR_GR_ENUM_VALUE_OFFSET as usize)?;
         let mut strings = Vec::with_capacity(number_of_string_used as usize);
         for i in 0..number_of_string_used as usize {
-            let start = 6 + i * DBR_ENUM_STRING_SIZE;
+            let start = DBR_ENUM_STRING_START + i * DBR_ENUM_STRING_SIZE;
             let end = start + DBR_ENUM_STRING_SIZE;
-            let Some(string) = Self::fixed_c_string(&buf[start..end]) else {
-                return;
-            };
-            strings.push(string);
+            strings.push(Self::fixed_c_string(Self::range(buf, start, end)?)?);
         }
 
-        self.set_status(status);
-        self.set_severity(severity);
-        self.set_number_of_string_used(number_of_string_used);
-        self.set_strings(strings);
+        Ok((number_of_string_used, strings))
     }
 
-    fn update_gr_char_meta_from_buf(&self, buf: &Vec<u8>) {
-        if buf.len() < DBR_GR_CHAR_VALUE_OFFSET as usize {
-            return;
-        }
-
-        let status_code = i16::from_be_bytes([buf[0], buf[1]]);
-        let severity_code = i16::from_be_bytes([buf[2], buf[3]]);
-
-        let Some(status) = ChannelStatus::from_i16(status_code) else {
-            return;
-        };
-        let Some(severity) = ChannelSeverity::from_i16(severity_code) else {
-            return;
-        };
-
-        let Some(units) = Self::fixed_c_string(&buf[4..12]) else {
-            return;
-        };
-
-        self.set_status(status);
-        self.set_severity(severity);
-        self.set_units(units);
-        self.set_upper_display_limit(buf[12] as i16);
-        self.set_lower_display_limit(buf[13] as i16);
-        self.set_upper_alarm_limit(buf[14] as i16);
-        self.set_upper_warning_limit(buf[15] as i16);
-        self.set_lower_warning_limit(buf[16] as i16);
-        self.set_lower_alarm_limit(buf[17] as i16);
+    fn range(buf: &[u8], start: usize, end: usize) -> Result<&[u8], String> {
+        Self::require_len(buf, end)?;
+        Ok(&buf[start..end])
     }
+}
 
-    fn update_gr_long_meta_from_buf(&self, buf: &Vec<u8>) {
-        if buf.len() < DBR_GR_LONG_VALUE_OFFSET as usize {
-            return;
-        }
-
-        let status_code = i16::from_be_bytes([buf[0], buf[1]]);
-        let severity_code = i16::from_be_bytes([buf[2], buf[3]]);
-
-        let Some(status) = ChannelStatus::from_i16(status_code) else {
-            return;
-        };
-        let Some(severity) = ChannelSeverity::from_i16(severity_code) else {
-            return;
-        };
-
-        let Some(units) = Self::fixed_c_string(&buf[4..12]) else {
-            return;
-        };
-
-        self.set_status(status);
-        self.set_severity(severity);
-        self.set_units(units);
-        self.set_upper_display_limit(
-            i32::from_be_bytes([buf[12], buf[13], buf[14], buf[15]]) as i16
-        );
-        self.set_lower_display_limit(
-            i32::from_be_bytes([buf[16], buf[17], buf[18], buf[19]]) as i16
-        );
-        self.set_upper_alarm_limit(i32::from_be_bytes([buf[20], buf[21], buf[22], buf[23]]) as i16);
-        self.set_upper_warning_limit(
-            i32::from_be_bytes([buf[24], buf[25], buf[26], buf[27]]) as i16
-        );
-        self.set_lower_warning_limit(
-            i32::from_be_bytes([buf[28], buf[29], buf[30], buf[31]]) as i16
-        );
-        self.set_lower_alarm_limit(i32::from_be_bytes([buf[32], buf[33], buf[34], buf[35]]) as i16);
-    }
-
-    fn update_ctrl_int_meta_from_buf(&self, buf: &Vec<u8>) {
-        if buf.len() < DBR_CTRL_SHORT_VALUE_OFFSET as usize {
-            return;
-        }
-
-        let status_code = i16::from_be_bytes([buf[0], buf[1]]);
-        let severity_code = i16::from_be_bytes([buf[2], buf[3]]);
-
-        let Some(status) = ChannelStatus::from_i16(status_code) else {
-            return;
-        };
-        let Some(severity) = ChannelSeverity::from_i16(severity_code) else {
-            return;
-        };
-
-        let Some(units) = Self::fixed_c_string(&buf[4..12]) else {
-            return;
-        };
-
-        self.set_status(status);
-        self.set_severity(severity);
-        self.set_units(units);
-        self.set_upper_display_limit(i16::from_be_bytes([buf[12], buf[13]]));
-        self.set_lower_display_limit(i16::from_be_bytes([buf[14], buf[15]]));
-        self.set_upper_alarm_limit(i16::from_be_bytes([buf[16], buf[17]]));
-        self.set_upper_warning_limit(i16::from_be_bytes([buf[18], buf[19]]));
-        self.set_lower_warning_limit(i16::from_be_bytes([buf[20], buf[21]]));
-        self.set_lower_alarm_limit(i16::from_be_bytes([buf[22], buf[23]]));
-    }
-    fn update_ctrl_float_meta_from_buf(&self, buf: &Vec<u8>) {
-        if buf.len() < DBR_CTRL_FLOAT_VALUE_OFFSET as usize {
-            return;
-        }
-
-        let status_code = i16::from_be_bytes([buf[0], buf[1]]);
-        let severity_code = i16::from_be_bytes([buf[2], buf[3]]);
-
-        let Some(status) = ChannelStatus::from_i16(status_code) else {
-            return;
-        };
-        let Some(severity) = ChannelSeverity::from_i16(severity_code) else {
-            return;
-        };
-
-        let Some(units) = Self::fixed_c_string(&buf[8..16]) else {
-            return;
-        };
-
-        self.set_status(status);
-        self.set_severity(severity);
-        self.set_precision(i16::from_be_bytes([buf[4], buf[5]]));
-        self.set_padding(i16::from_be_bytes([buf[6], buf[7]]));
-        self.set_units(units);
-        self.set_upper_display_limit(
-            f32::from_be_bytes([buf[16], buf[17], buf[18], buf[19]]) as i16
-        );
-        self.set_lower_display_limit(
-            f32::from_be_bytes([buf[20], buf[21], buf[22], buf[23]]) as i16
-        );
-        self.set_upper_alarm_limit(f32::from_be_bytes([buf[24], buf[25], buf[26], buf[27]]) as i16);
-        self.set_upper_warning_limit(
-            f32::from_be_bytes([buf[28], buf[29], buf[30], buf[31]]) as i16
-        );
-        self.set_lower_warning_limit(
-            f32::from_be_bytes([buf[32], buf[33], buf[34], buf[35]]) as i16
-        );
-        self.set_lower_alarm_limit(f32::from_be_bytes([buf[36], buf[37], buf[38], buf[39]]) as i16);
-    }
-    fn update_ctrl_double_meta_from_buf(&self, buf: &Vec<u8>) {
-        if buf.len() < DBR_CTRL_DOUBLE_VALUE_OFFSET as usize {
-            return;
-        }
-
-        let status_code = i16::from_be_bytes([buf[0], buf[1]]);
-        let severity_code = i16::from_be_bytes([buf[2], buf[3]]);
-
-        let Some(status) = ChannelStatus::from_i16(status_code) else {
-            return;
-        };
-        let Some(severity) = ChannelSeverity::from_i16(severity_code) else {
-            return;
-        };
-
-        let Some(units) = Self::fixed_c_string(&buf[8..16]) else {
-            return;
-        };
-
-        self.set_status(status);
-        self.set_severity(severity);
-        self.set_precision(i16::from_be_bytes([buf[4], buf[5]]));
-        self.set_padding(i16::from_be_bytes([buf[6], buf[7]]));
-        self.set_units(units);
-        self.set_upper_display_limit(f64::from_be_bytes([
-            buf[16], buf[17], buf[18], buf[19], buf[20], buf[21], buf[22], buf[23],
-        ]) as i16);
-        self.set_lower_display_limit(f64::from_be_bytes([
-            buf[24], buf[25], buf[26], buf[27], buf[28], buf[29], buf[30], buf[31],
-        ]) as i16);
-        self.set_upper_alarm_limit(f64::from_be_bytes([
-            buf[32], buf[33], buf[34], buf[35], buf[36], buf[37], buf[38], buf[39],
-        ]) as i16);
-        self.set_upper_warning_limit(f64::from_be_bytes([
-            buf[40], buf[41], buf[42], buf[43], buf[44], buf[45], buf[46], buf[47],
-        ]) as i16);
-        self.set_lower_warning_limit(f64::from_be_bytes([
-            buf[48], buf[49], buf[50], buf[51], buf[52], buf[53], buf[54], buf[55],
-        ]) as i16);
-        self.set_lower_alarm_limit(f64::from_be_bytes([
-            buf[56], buf[57], buf[58], buf[59], buf[60], buf[61], buf[62], buf[63],
-        ]) as i16);
-    }
-    fn update_ctrl_long_meta_from_buf(&self, buf: &Vec<u8>) {
-        if buf.len() < DBR_CTRL_LONG_VALUE_OFFSET as usize {
-            return;
-        }
-
-        let status_code = i16::from_be_bytes([buf[0], buf[1]]);
-        let severity_code = i16::from_be_bytes([buf[2], buf[3]]);
-
-        let Some(status) = ChannelStatus::from_i16(status_code) else {
-            return;
-        };
-        let Some(severity) = ChannelSeverity::from_i16(severity_code) else {
-            return;
-        };
-
-        let Some(units) = Self::fixed_c_string(&buf[4..12]) else {
-            return;
-        };
-
-        self.set_status(status);
-        self.set_severity(severity);
-        self.set_units(units);
-        self.set_upper_display_limit(
-            i32::from_be_bytes([buf[12], buf[13], buf[14], buf[15]]) as i16
-        );
-        self.set_lower_display_limit(
-            i32::from_be_bytes([buf[16], buf[17], buf[18], buf[19]]) as i16
-        );
-        self.set_upper_alarm_limit(i32::from_be_bytes([buf[20], buf[21], buf[22], buf[23]]) as i16);
-        self.set_upper_warning_limit(
-            i32::from_be_bytes([buf[24], buf[25], buf[26], buf[27]]) as i16
-        );
-        self.set_lower_warning_limit(
-            i32::from_be_bytes([buf[28], buf[29], buf[30], buf[31]]) as i16
-        );
-        self.set_lower_alarm_limit(i32::from_be_bytes([buf[32], buf[33], buf[34], buf[35]]) as i16);
-    }
-    fn update_ctrl_char_meta_from_buf(&self, buf: &Vec<u8>) {
-        if buf.len() < DBR_CTRL_CHAR_VALUE_OFFSET as usize {
-            return;
-        }
-
-        let status_code = i16::from_be_bytes([buf[0], buf[1]]);
-        let severity_code = i16::from_be_bytes([buf[2], buf[3]]);
-
-        let Some(status) = ChannelStatus::from_i16(status_code) else {
-            return;
-        };
-        let Some(severity) = ChannelSeverity::from_i16(severity_code) else {
-            return;
-        };
-
-        let Some(units) = Self::fixed_c_string(&buf[4..12]) else {
-            return;
-        };
-
-        self.set_status(status);
-        self.set_severity(severity);
-        self.set_units(units);
-        self.set_upper_display_limit(buf[12] as i16);
-        self.set_lower_display_limit(buf[13] as i16);
-        self.set_upper_alarm_limit(buf[14] as i16);
-        self.set_upper_warning_limit(buf[15] as i16);
-        self.set_lower_warning_limit(buf[16] as i16);
-        self.set_lower_alarm_limit(buf[17] as i16);
-    }
-
+impl Channel {
+    
     // ----------------- dbr type conversion -------
-    pub fn dbr_type_native_as_time(self: &Self) -> DbrType {
-        match self.dbr_type_native() {
+    pub fn data_type_native_as_time(self: &Self) -> DbrType {
+        match self.data_type_native() {
             DbrType::String
             | DbrType::StsString
             | DbrType::TimeString
@@ -966,8 +982,8 @@ impl Channel {
         }
     }
 
-    pub fn dbr_type_native_as_sts(self: &Self) -> DbrType {
-        match self.dbr_type_native() {
+    pub fn data_type_native_as_sts(self: &Self) -> DbrType {
+        match self.data_type_native() {
             DbrType::String
             | DbrType::StsString
             | DbrType::TimeString
@@ -1010,8 +1026,8 @@ impl Channel {
         }
     }
 
-    pub fn dbr_type_native_as_gr(self: &Self) -> DbrType {
-        match self.dbr_type_native() {
+    pub fn data_type_native_as_gr(self: &Self) -> DbrType {
+        match self.data_type_native() {
             DbrType::String
             | DbrType::StsString
             | DbrType::TimeString
@@ -1054,8 +1070,8 @@ impl Channel {
         }
     }
 
-    pub fn dbr_type_native_as_ctrl(self: &Self) -> DbrType {
-        match self.dbr_type_native() {
+    pub fn data_type_native_as_ctrl(self: &Self) -> DbrType {
+        match self.data_type_native() {
             DbrType::String
             | DbrType::StsString
             | DbrType::TimeString

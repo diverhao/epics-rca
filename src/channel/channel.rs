@@ -1,11 +1,12 @@
-use crate::ca;
 use crate::ca::message::CaMsg;
 use crate::channel::dbr::{ChannelAccessRights, ChannelSeverity, ChannelState, ChannelStatus};
 use crate::channel::dbr::{DbrType, DbrValue};
+use crate::channel::dbr_data::{self, DbrData};
 use crate::channel::meta::Meta;
 use crate::channel::monitor::{self, Monitor, MonitorDataType, MonitorState};
 use crate::context::context::get_context;
 use crate::tcp::tcp::TCP;
+use crate::{ca, channel};
 use core::num;
 use log::{debug, error, warn};
 use std::net::SocketAddr;
@@ -18,7 +19,7 @@ use tokio::sync::Notify;
 use tokio::time::timeout;
 
 // channel monitor callback function
-pub type ChannelCallback = Arc<dyn Fn(&Channel) + Send + Sync + 'static>;
+pub type ChannelCallback = Arc<dyn Fn(u32, DbrType, u32, &DbrData) + Send + Sync + 'static>;
 
 pub struct Channel {
     name: String,
@@ -249,7 +250,7 @@ impl Channel {
     pub fn get(
         self: &Self,
         timeout_sec: Option<f64>,
-        dbr_type: Option<MonitorDataType>,
+        data_type: Option<MonitorDataType>,
         data_count: Option<u32>,
         callback: Option<ChannelCallback>,
     ) {
@@ -269,7 +270,7 @@ impl Channel {
             // append IO
             get_context()
                 .channels()
-                .add_io(ioid, cid, dbr_type, data_count, callback);
+                .add_io(ioid, cid, data_type, data_count, callback);
             return;
         }
         self.get_step_2();
@@ -281,34 +282,42 @@ impl Channel {
      *
      * Update channel value, call callback, then return the value
      */
-    pub fn get_step_3(self: &Self, msg: CaMsg) {
+    pub fn get_step_3(self: &Self, msg: CaMsg) -> Result<DbrData, String> {
         let ioid = msg.header().param2;
-        let num_elem = msg.header().data_count;
-        let dbr_type = match DbrType::from_u16(msg.header().data_type) {
-            Some(dbr_type) => dbr_type,
+        let cid = self.cid();
+        let data_count = msg.header().data_count;
+        let data_type = match DbrType::from_u16(msg.header().data_type) {
+            Some(data_type) => data_type,
             None => {
                 // remove this IO
                 get_context().channels().remove_io_by_ioid(ioid);
-                return;
+                return Err("Message error: no data type".to_string());
             }
         };
 
-        self.update_value(msg.payload(), num_elem, dbr_type);
+        let dbr_data = DbrData::from_buf(msg.payload(), data_type, data_count);
 
         // remove and get IO
         let io = match get_context().channels().remove_io_by_ioid(ioid) {
             Some(io) => io,
-            None => return, // no side effect, just return
+            None => return Err("No IO ID".to_string()), // no side effect, just return
         };
 
-        // call callback
-        match io.callback {
-            Some(callback) => {
-                callback(self);
+        match dbr_data {
+            Ok(dbr_data) => {
+                match io.callback {
+                    Some(callback) => {
+                        callback(cid, data_type, data_count, &dbr_data);
+                    },
+                    None => {},
+                }
+                // todo: return dbr_data first, then call callback
+                return Ok(dbr_data);
             }
-            None => {} // no callback
-        };
-        debug!("------------------ we are here ------------------------");
+            Err(_) => {
+                return Err("No dbr data".to_string());
+            }
+        }
     }
 
     // invoked after channel is Created
@@ -326,10 +335,10 @@ impl Channel {
                 None => return, // let TCP check-alive handle it
             };
 
-            let dbr_type = {
-                match io.dbr_type {
-                    Some(dbr_type) => dbr_type.resolve(self),
-                    None => self.dbr_type_native(),
+            let data_type = {
+                match io.data_type {
+                    Some(data_type) => data_type.resolve(self),
+                    None => self.data_type_native(),
                 }
             };
 
@@ -340,7 +349,7 @@ impl Channel {
                 }
             };
 
-            let msg = CaMsg::build_read_notify(dbr_type, data_count, sid, ioid, &vec![dest]);
+            let msg = CaMsg::build_read_notify(data_type, data_count, sid, ioid, &vec![dest]);
             let tcp: Arc<TCP> = match get_context().tcps().tcp(&dest) {
                 Some(tcp) => tcp,
                 None => return, // no such TCP, let TCP alive check handle it
@@ -475,15 +484,8 @@ impl Channel {
             }
         }
     }
-
-    pub fn call_monitor_callback(self: &Self) {
-        if let Some(callback) = self.monitor_callback().clone() {
-            callback(self);
-        } else {
-            // no callback
-        }
-    }
 }
+
 impl std::fmt::Display for Channel {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         let meta = self.meta().to_string().replace('\n', "\n    ");
