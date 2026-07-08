@@ -102,27 +102,29 @@ async fn main() {
     // channel.get(channel::dbr::DbrType::StsDouble, 1).await;
     // channel1.get(Some(5.0), None, None, None).await;
 
-    let callback1 = Arc::new(move |cid: u32, data_type: DbrType, data_count: u32, dbr_data: &DbrData| {
-        // println!("{}", dbr_data);
-        // println!(">> {}", channel.name());
-        // debug!(
-        //     "{} has a new value: {:?}, {}",
-        //     channel.name(),
-        //     channel.value(),
-        //     channel.meta()
-        // );
-        // let value = match channel.value().clone().unwrap() {
-        //     DbrValue::Double(value) => Some(value),
-        //     _ => None,
-        // };
-        // if let Some(value) = value {
-        //     // *data_for_callback.write().unwrap() = value[0];
-        //     debug!("{:?}", value);
-        // }
-        // if let Some(data) = channel.dbr_data(channel.dbr_type_native_as_time()) {
-        //     debug!("------------------------------>>>{}", data);
-        // }
-    });
+    let callback1 = Arc::new(
+        move |cid: u32, data_type: DbrType, data_count: u32, dbr_data: &DbrData| {
+            // prinxtln!("{}", dbr_data);
+            // println!(">> {}", channel.name());
+            // debug!(
+            //     "{} has a new value: {:?}, {}",
+            //     channel.name(),
+            //     channel.value(),
+            //     channel.meta()
+            // );
+            // let value = match channel.value().clone().unwrap() {
+            //     DbrValue::Double(value) => Some(value),
+            //     _ => None,
+            // };
+            // if let Some(value) = value {
+            //     // *data_for_callback.write().unwrap() = value[0];
+            //     debug!("{:?}", value);
+            // }
+            // if let Some(data) = channel.dbr_data(channel.dbr_type_native_as_time()) {
+            //     debug!("------------------------------>>>{}", data);
+            // }
+        },
+    );
     // let callback5 = move |channel: &Channel| {
     //     debug!(
     //         "{} has a new value: {:?}, {}",

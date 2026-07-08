@@ -936,7 +936,6 @@ impl DbrData {
 }
 
 impl Channel {
-    
     // ----------------- dbr type conversion -------
     pub fn data_type_native_as_time(self: &Self) -> DbrType {
         match self.data_type_native() {

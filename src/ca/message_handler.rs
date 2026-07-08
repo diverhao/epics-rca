@@ -280,20 +280,20 @@ fn handle_ca_proto_event_add(msg: CaMsg) {
 
     // call callback
     // todo: ECA_XXX status
-    // if let Some(callback) = channel.monitor_callback().clone() {
-    //     // decode the data as late as possible
-    //     let dbr_data = DbrData::from_buf(msg.payload(), data_type, data_count);
-    //     match dbr_data {
-    //         Ok(dbr_data) => {
-    //             callback(cid, data_type, data_count, &dbr_data);
-    //         }
-    //         Err(_) => {
-    //             // failed to decode payload
-    //         }
-    //     };
-    // } else {
-    //     // no callback
-    // }
+    if let Some(callback) = channel.monitor_callback().clone() {
+        // decode the data as late as possible
+        let dbr_data = DbrData::from_buf(msg.payload(), data_type, data_count);
+        match dbr_data {
+            Ok(dbr_data) => {
+                callback(cid, data_type, data_count, &dbr_data);
+            }
+            Err(_) => {
+                // failed to decode payload
+            }
+        };
+    } else {
+        // no callback
+    }
 }
 
 fn handle_ca_proto_event_cancel(msg: CaMsg) {

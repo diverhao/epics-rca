@@ -593,5 +593,3 @@ fn fmt_ctrl_enum_data(f: &mut fmt::Formatter<'_>, name: &str, data: &CtrlEnumDat
     fmt_field_array(f, 1, "value", data.value.as_slice(), false)?;
     fmt_end_object(f)
 }
-
-
