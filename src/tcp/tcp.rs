@@ -27,6 +27,10 @@ use tokio::task::JoinHandle;
 use tokio::time::timeout;
 use tokio::time::{self, Duration};
 
+const TCP_READ_BUF_SIZE: usize = 64 * 1024;
+const TCP_READ_COALESCE_US: u64 = 250;
+const TCP_READ_MAX_DRAIN_ATTEMPTS: usize = 64;
+
 #[derive(PartialEq, Copy, Clone)]
 pub enum TcpState {
     NotConnected,
@@ -135,27 +139,25 @@ impl TCP {
 
         let handle = tokio::spawn(async move {
             let mut buf: Vec<u8> = vec![];
-            // read up to 4 kB each time
-            let mut buf_pending: [u8; 4096] = [0_u8; 4096];
-            let mut packet_count = 0;
-            loop {
-                if !tcp.is_connected() {
-                    break;
-                }
-
-                let num_bytes = {
-                    // take the lock
-                    let mut reader = tcp.reader.lock().await;
-                    // read data into buf_pending
-                    match reader.as_mut() {
-                        Some(reader) => reader.read(&mut buf_pending).await,
-                        None => {
-                            // no reader
-                            error!("No reader for TCP");
-                            break;
-                        }
+            let mut buf_pending: Vec<u8> = vec![0_u8; TCP_READ_BUF_SIZE];
+            let mut reader = {
+                let mut reader = tcp.reader.lock().await;
+                match reader.take() {
+                    Some(reader) => reader,
+                    None => {
+                        error!("No reader for TCP");
+                        return;
                     }
-                };
+                }
+            };
+
+            loop {
+                // hygrid read: async reader.read() + wait 250 micro-seconds for more data + sync reader.try_read()
+                //
+                // async read() wakes up when there is one byte in socket
+                // wait 250 micro-seconds for more data
+                // sync try_read() obtain as much data as possible from socket
+                let num_bytes = reader.read(&mut buf_pending).await;
 
                 // check reader status
                 match num_bytes {
@@ -165,9 +167,30 @@ impl TCP {
                         tcp.handle_tcp_failure(false, true).await;
                         break;
                     }
-                    Ok(size) => {
-                        packet_count = packet_count + 1;
+                    Ok(mut size) => {
+                        if TCP_READ_COALESCE_US > 0 {
+                            tokio::time::sleep(Duration::from_micros(TCP_READ_COALESCE_US)).await;
+                        }
+
+                        for _ in 0..TCP_READ_MAX_DRAIN_ATTEMPTS {
+                            if size == buf_pending.len() {
+                                break;
+                            }
+                            // synchronous reading
+                            match reader.try_read(&mut buf_pending[size..]) {
+                                Ok(0) => break,
+                                Ok(extra_size) => size += extra_size,
+                                Err(err) if err.kind() == std::io::ErrorKind::WouldBlock => break,
+                                Err(err) => {
+                                    tcp.handle_tcp_failure(false, true).await;
+                                    error!("TCP error: {err}");
+                                    return;
+                                }
+                            }
+                        }
+
                         debug!("Received {size} TCP bytes from {}", tcp.addr());
+
                         buf.extend_from_slice(&buf_pending[..size]);
 
                         let msgs =
