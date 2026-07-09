@@ -1,20 +1,21 @@
 #![allow(dead_code, unused_imports, unused_variables)]
 
 mod alloc_stats;
-mod ca;
-mod channel;
+mod ca_channel;
+mod ca_message;
 mod context;
 mod env;
+mod pva_message;
 mod tcp;
 mod udp;
 
-use crate::channel::channel::Channel;
-use crate::channel::dbr::ChannelState;
-use crate::channel::dbr::DbrType;
-use crate::channel::dbr::DbrValue;
-use crate::channel::dbr_data::DbrData;
-use crate::channel::monitor::MonitorDataType;
-use crate::channel::monitor::MonitorState;
+use crate::ca_channel::channel::Channel;
+use crate::ca_channel::dbr::ChannelState;
+use crate::ca_channel::dbr::DbrType;
+use crate::ca_channel::dbr::DbrValue;
+use crate::ca_channel::dbr_data::DbrData;
+use crate::ca_channel::monitor::MonitorDataType;
+use crate::ca_channel::monitor::MonitorState;
 use crate::context::context::create_context;
 use crate::context::context::get_context;
 use ::log::LevelFilter;
@@ -104,7 +105,7 @@ async fn main() {
 
     let callback1 = Arc::new(
         move |cid: u32, data_type: DbrType, data_count: u32, dbr_data: &DbrData| {
-            // prinxtln!("{}", dbr_data);
+            // println!("{}", dbr_data);
             // println!(">> {}", channel.name());
             // debug!(
             //     "{} has a new value: {:?}, {}",

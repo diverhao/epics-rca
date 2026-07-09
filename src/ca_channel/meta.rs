@@ -1,4 +1,4 @@
-use crate::channel::channel::Channel;
+use crate::ca_channel::channel::Channel;
 use crate::context::context::get_context;
 use core::num;
 use std::net::SocketAddr;
@@ -8,9 +8,9 @@ use std::sync::{
 };
 use tokio::sync::Notify;
 
-use crate::ca::message::CaMsg;
-use crate::channel::dbr::{ChannelAccessRights, ChannelSeverity, ChannelState, ChannelStatus};
-use crate::channel::dbr::{DbrType, DbrValue};
+use crate::ca_channel::dbr::{ChannelAccessRights, ChannelSeverity, ChannelState, ChannelStatus};
+use crate::ca_channel::dbr::{DbrType, DbrValue};
+use crate::ca_message::message::CaMsg;
 use log::{debug, error, warn};
 
 pub struct Meta {

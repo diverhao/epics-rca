@@ -1,4 +1,4 @@
-use crate::channel::channel::{Channel, ChannelCallback};
+use crate::ca_channel::channel::{Channel, ChannelCallback};
 use crate::context::context::get_context;
 use core::num;
 use std::net::SocketAddr;
@@ -9,11 +9,11 @@ use std::sync::{
 };
 use tokio::sync::Notify;
 
-use crate::ca::message::CaMsg;
-use crate::channel::dbr::{
+use crate::ca_channel::dbr::{
     self, ChannelAccessRights, ChannelSeverity, ChannelState, ChannelStatus,
 };
-use crate::channel::dbr::{DbrType, DbrValue};
+use crate::ca_channel::dbr::{DbrType, DbrValue};
+use crate::ca_message::message::CaMsg;
 use log::{debug, error, warn};
 
 #[derive(Debug, Copy, Clone, PartialEq)]

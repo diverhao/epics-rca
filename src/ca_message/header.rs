@@ -1,6 +1,6 @@
-use crate::ca::cmd::CaCmd;
-use crate::channel::dbr::{ChannelAccessRights, ChannelSeverity, ChannelState, ChannelStatus};
-use crate::channel::dbr::{DbrType, DbrValue};
+use crate::ca_channel::dbr::{ChannelAccessRights, ChannelSeverity, ChannelState, ChannelStatus};
+use crate::ca_channel::dbr::{DbrType, DbrValue};
+use crate::ca_message::cmd::CaCmd;
 use crate::context::context::get_context;
 use crate::udp::udp::UDP;
 use ::log::debug;

@@ -1,5 +1,5 @@
-use crate::channel::channel::Channel;
-use crate::channel::dbr_data::{
+use crate::ca_channel::channel::Channel;
+use crate::ca_channel::dbr_data::{
     CtrlData, CtrlEnumData, CtrlPrecisionData, DbrData, GrData, GrEnumData, GrPrecisionData,
     PlainData, StsAckStringData, StsData, TimeData,
 };
@@ -454,11 +454,7 @@ impl DbrData {
         Self::from_buf(&buf, data_type, data_count)
     }
 
-    fn checked_value_end(
-        start: usize,
-        data_count: u32,
-        elem_size: usize,
-    ) -> Result<usize, String> {
+    fn checked_value_end(start: usize, data_count: u32, elem_size: usize) -> Result<usize, String> {
         let data_count =
             usize::try_from(data_count).map_err(|_| "Element count too large".to_string())?;
         let len = data_count
@@ -570,11 +566,7 @@ impl DbrData {
         }
     }
 
-    fn validate_payload_len(
-        buf: &[u8],
-        data_type: DbrType,
-        data_count: u32,
-    ) -> Result<(), String> {
+    fn validate_payload_len(buf: &[u8], data_type: DbrType, data_count: u32) -> Result<(), String> {
         let expected_len = Self::expected_payload_len(data_type, data_count)?;
         if buf.len() < expected_len {
             return Err(format!(

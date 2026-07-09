@@ -1,12 +1,11 @@
-use crate::ca::message::CaMsg;
-use crate::channel::dbr::{ChannelAccessRights, ChannelSeverity, ChannelState, ChannelStatus};
-use crate::channel::dbr::{DbrType, DbrValue};
-use crate::channel::dbr_data::{self, DbrData};
-use crate::channel::meta::Meta;
-use crate::channel::monitor::{self, Monitor, MonitorDataType, MonitorState};
+use crate::ca_channel::dbr::{ChannelAccessRights, ChannelSeverity, ChannelState, ChannelStatus};
+use crate::ca_channel::dbr::{DbrType, DbrValue};
+use crate::ca_channel::dbr_data::{self, DbrData};
+use crate::ca_channel::meta::Meta;
+use crate::ca_channel::monitor::{self, Monitor, MonitorDataType, MonitorState};
+use crate::ca_message::message::CaMsg;
 use crate::context::context::get_context;
 use crate::tcp::tcp::TCP;
-use crate::{ca, channel};
 use core::num;
 use log::{debug, error, warn};
 use std::net::SocketAddr;

@@ -1,11 +1,11 @@
-use crate::ca::cmd::CaCmd;
-use crate::ca::message::{CA_MINOR_VERSION, CaMsg, SearchReplyFlag};
-use crate::channel::channel::Channel;
-use crate::channel::dbr::{ChannelAccessRights, ChannelSeverity, ChannelState, ChannelStatus};
-use crate::channel::dbr::{DbrType, DbrValue};
-use crate::channel::dbr_data::DbrData;
-use crate::channel::monitor::{Monitor, MonitorState};
-use crate::channel::{self, monitor};
+use crate::ca_channel::channel::Channel;
+use crate::ca_channel::dbr::{ChannelAccessRights, ChannelSeverity, ChannelState, ChannelStatus};
+use crate::ca_channel::dbr::{DbrType, DbrValue};
+use crate::ca_channel::dbr_data::DbrData;
+use crate::ca_channel::monitor::{Monitor, MonitorState};
+use crate::ca_channel::{self, monitor};
+use crate::ca_message::cmd::CaCmd;
+use crate::ca_message::message::{CA_MINOR_VERSION, CaMsg, SearchReplyFlag};
 use crate::context::context::get_context;
 use crate::udp::udp::UDP;
 use ::log::error;
@@ -113,7 +113,7 @@ pub fn handle_ca_proto_search(msg: CaMsg) {
     let channels = context.channels();
 
     // find the channel
-    let channel: Arc<channel::channel::Channel> = match channels.channel_by_cid(search_id) {
+    let channel: Arc<Channel> = match channels.channel_by_cid(search_id) {
         Some(channel) => channel,
         None => return, // channel not found
     };

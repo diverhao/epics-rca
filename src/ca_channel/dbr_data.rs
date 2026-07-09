@@ -1,5 +1,5 @@
-use crate::channel::channel::Channel;
-use crate::channel::dbr::{ChannelSeverity, ChannelStatus, DbrType, DbrValue};
+use crate::ca_channel::channel::Channel;
+use crate::ca_channel::dbr::{ChannelSeverity, ChannelStatus, DbrType, DbrValue};
 use std::{fmt, sync::Arc};
 
 pub type DbrArray<T> = Arc<Vec<T>>;

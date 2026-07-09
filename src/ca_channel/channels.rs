@@ -1,11 +1,11 @@
-use crate::ca::message::{CaMsg, MAX_UDP_SEND};
-use crate::channel;
-use crate::channel::channel::ChannelCallback;
-use crate::channel::dbr::{ChannelAccessRights, ChannelSeverity, ChannelState, ChannelStatus};
-use crate::channel::dbr::{DbrType, DbrValue};
-use crate::channel::monitor::{MonitorDataType, MonitorState};
+use crate::ca_channel;
+use crate::ca_channel::channel::ChannelCallback;
+use crate::ca_channel::dbr::{ChannelAccessRights, ChannelSeverity, ChannelState, ChannelStatus};
+use crate::ca_channel::dbr::{DbrType, DbrValue};
+use crate::ca_channel::monitor::{MonitorDataType, MonitorState};
+use crate::ca_message::message::{CaMsg, MAX_UDP_SEND};
 use crate::env::env::EnvType;
-use crate::{channel::channel::Channel, context::context::get_context};
+use crate::{ca_channel::channel::Channel, context::context::get_context};
 use log::{debug, warn};
 use std::char::MAX;
 use std::collections::HashMap;
