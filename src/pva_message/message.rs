@@ -525,9 +525,10 @@ pub enum PvaType {
     StructureVarSizeArray(PvaStructType), // 0x88, 0b 100 01 000
 
     Union(PvaUnionType),             // 0x81, 0b 100 00 001
-    VariantUnion,                    // 0x82, 0b 100 00 010
     UnionVarSizeArray(PvaUnionType), // 0x89, 0b 100 01 001
-    VariantUnionVarSizeArray,        // 0x8A, 0b 100 01 010
+
+    VariantUnion,             // 0x82, 0b 100 00 010
+    VariantUnionVarSizeArray, // 0x8A, 0b 100 01 010
 }
 
 impl PvaType {
@@ -574,15 +575,23 @@ impl PvaType {
         })
     }
 
-    /**
-     * A regular union buffer is composed of
-     *
-     * type code (u8) + ID string (PVA String) + number of fields (PVA Size) + array of fields
-     *
-     * where each field is composed of
-     *
-     * field name (PVA String) + field type (PVA Type)
-     */
+    pub fn from_buf_struct_array(
+        buf: &[u8],
+        offset: &mut usize,
+        endian: MsgEndian,
+    ) -> Result<PvaStructType, String> {
+        // the 0x88 type code has been consumed
+        match Self::from_buf(buf, offset, endian)? {
+            PvaType::Structure(structure) => return Ok(structure),
+            _ => {
+                return Err(String::from(
+                    "Error: Structure array element type is not a structure",
+                ));
+            }
+        }
+    }
+
+    // alias of from_buf_sturct()
     pub fn from_buf_union(
         buf: &[u8],
         offset: &mut usize,
@@ -590,6 +599,16 @@ impl PvaType {
     ) -> Result<PvaUnionType, String> {
         // the 0x81 type code has been consumed
         Self::from_buf_struct(buf, offset, endian)
+    }
+
+    // alias of from_buf_sturct_array()
+    pub fn from_buf_union_array(
+        buf: &[u8],
+        offset: &mut usize,
+        endian: MsgEndian,
+    ) -> Result<PvaUnionType, String> {
+        // the 0x89 type code has been consumed
+        Self::from_buf_struct_array(buf, offset, endian)
     }
 
     pub fn from_buf(buf: &[u8], offset: &mut usize, endian: MsgEndian) -> Result<Self, String> {
@@ -622,9 +641,6 @@ impl PvaType {
             0x4A => PvaType::FloatVarSizeArray,
             0x4B => PvaType::DoubleVarSizeArray,
             0x68 => PvaType::StringVarSizeArray,
-
-            0x82 => PvaType::VariantUnion,
-            0x8A => PvaType::VariantUnionVarSizeArray,
 
             0x10 => PvaType::BooleanBoundArray(PvaSize::from_buf_no_null(buf, offset, endian)?),
             0x18 => PvaType::BooleanFixArray(PvaSize::from_buf_no_null(buf, offset, endian)?),
@@ -663,10 +679,18 @@ impl PvaType {
             0x78 => PvaType::StringFixArray(PvaSize::from_buf_no_null(buf, offset, endian)?),
 
             0x80 => PvaType::Structure(PvaType::from_buf_struct(buf, offset, endian)?),
-            0x88 => PvaType::StructureVarSizeArray(PvaType::from_buf_struct(buf, offset, endian)?),
+            0x88 => {
+                PvaType::StructureVarSizeArray(PvaType::from_buf_struct_array(buf, offset, endian)?)
+            }
 
             0x81 => PvaType::Union(PvaType::from_buf_union(buf, offset, endian)?),
-            0x89 => PvaType::UnionVarSizeArray(PvaType::from_buf_union(buf, offset, endian)?),
+            0x89 => PvaType::UnionVarSizeArray(PvaType::from_buf_union_array(buf, offset, endian)?),
+
+            0x82 | 0x8A => {
+                return Err(format!(
+                    "Error: PVA variant union type code 0x{code:02X} is not implemented"
+                ));
+            }
 
             _ => return Err(format!("Error: Invalid PVA type code 0x{code:02X}")),
         };
