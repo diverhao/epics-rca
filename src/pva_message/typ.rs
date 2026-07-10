@@ -1,7 +1,8 @@
 use crate::{
     pva_message::{
         header::MsgEndian,
-        primitive::{PvaElement, PvaSize}, type_registry::PvaTypeRegistry,
+        primitive::{PvaElement, PvaSize},
+        type_registry::PvaTypeRegistry,
     },
     tcp::tcp::TCP,
 };
@@ -225,7 +226,10 @@ impl PvaType {
                 return Ok(PvaType::UnionVarSizeArray(union_type));
             }
 
-            0x82 | 0x8A => {
+            0x82 => PvaType::VariantUnion,
+
+            // todo: implement it
+            0x8A => {
                 return Err(format!(
                     "Error: PVA variant union type code 0x{code:02X} is not implemented"
                 ));
@@ -396,7 +400,13 @@ impl PvaType {
                 typ.to_buf(buf, endian)?;
             }
 
-            Self::VariantUnion | Self::VariantUnionVarSizeArray => {
+            Self::VariantUnion => {
+                // append 0x82
+                buf.push(0x89);
+            }
+
+            // todo: implement it
+            Self::VariantUnionVarSizeArray => {
                 return Err("Variant Union type encoding has not been implemented".to_string());
             }
         }
