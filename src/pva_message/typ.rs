@@ -74,8 +74,8 @@ pub enum PvaType {
     StringBoundArray(usize), // 0x70, 0b 011 10 000
     StringFixArray(usize),   // 0x78, 0b 011 11 000
 
-    Structure(PvaStructType),             // 0x80, 0b 100 00 000
-    StructureVarSizeArray(PvaStructType), // 0x88, 0b 100 01 000
+    Struct(PvaStructType),             // 0x80, 0b 100 00 000
+    StructVarSizeArray(PvaStructType), // 0x88, 0b 100 01 000
 
     Union(PvaUnionType),             // 0x81, 0b 100 00 001
     UnionVarSizeArray(PvaUnionType), // 0x89, 0b 100 01 001
@@ -196,9 +196,9 @@ impl PvaType {
             0x80 => {
                 // retract by 1 for 0x80
                 *offset -= 1;
-                PvaType::Structure(PvaStructType::from_buf(buf, offset, endian)?)
+                PvaType::Struct(PvaStructType::from_buf(buf, offset, endian)?)
             }
-            0x88 => PvaType::StructureVarSizeArray(PvaStructType::from_buf(buf, offset, endian)?),
+            0x88 => PvaType::StructVarSizeArray(PvaStructType::from_buf(buf, offset, endian)?),
 
             0x81 => {
                 // retract by 1 for 0x81
@@ -359,10 +359,10 @@ impl PvaType {
                 len.to_buf(buf, endian)?;
             }
 
-            Self::Structure(typ) => {
+            Self::Struct(typ) => {
                 typ.to_buf(buf, endian)?;
             }
-            Self::StructureVarSizeArray(typ) => {
+            Self::StructVarSizeArray(typ) => {
                 // append 0x88
                 buf.push(0x88);
                 typ.to_buf(buf, endian)?;
@@ -394,7 +394,7 @@ pub struct PvaStructType {
 }
 
 impl PvaStructType {
-    pub fn to_buf(self: &Self, buf: &mut Vec<u8>, endian: MsgEndian) -> Result<(), String> {
+    fn to_buf(self: &Self, buf: &mut Vec<u8>, endian: MsgEndian) -> Result<(), String> {
         // code 0x80
         buf.push(0x80);
 
@@ -412,7 +412,7 @@ impl PvaStructType {
         Ok(())
     }
 
-    pub fn from_buf(
+    fn from_buf(
         buf: &[u8],
         offset: &mut usize,
         endian: MsgEndian,
@@ -480,7 +480,7 @@ pub struct PvaUnionType {
 }
 
 impl PvaUnionType {
-    pub fn to_buf(self: &Self, buf: &mut Vec<u8>, endian: MsgEndian) -> Result<(), String> {
+    fn to_buf(self: &Self, buf: &mut Vec<u8>, endian: MsgEndian) -> Result<(), String> {
         // code 0x81
         buf.push(0x81);
 
@@ -498,11 +498,7 @@ impl PvaUnionType {
         Ok(())
     }
 
-    pub fn from_buf(
-        buf: &[u8],
-        offset: &mut usize,
-        endian: MsgEndian,
-    ) -> Result<PvaUnionType, String> {
+    fn from_buf(buf: &[u8], offset: &mut usize, endian: MsgEndian) -> Result<PvaUnionType, String> {
         // consume 0x81
         let code = u8::from_buf(buf, offset, endian)?;
 
@@ -524,88 +520,4 @@ impl PvaUnionType {
             fields: fields,
         })
     }
-}
-
-// --------------- PVA value --------------
-pub enum PvaValue {
-    Boolean(bool),
-    Byte(i8),
-    Short(i16),
-    Int(i32),
-    Long(i64),
-    UByte(u8),
-    UShort(u16),
-    UInt(u32),
-    ULong(u64),
-    Float(f32),
-    Double(f64),
-    String(String),
-    BoundString(String),
-
-    BooleanVarSizeArray(Vec<bool>),
-    BooleanBoundArray(Vec<bool>),
-    BooleanFixArray(Vec<bool>),
-
-    ByteVarSizeArray(Vec<i8>),
-    ByteBoundArray(Vec<i8>),
-    ByteFixArray(Vec<i8>),
-
-    ShortVarSizeArray(Vec<i16>),
-    ShortBoundArray(Vec<i16>),
-    ShortFixArray(Vec<i16>),
-
-    IntVarSizeArray(Vec<i32>),
-    IntBoundArray(Vec<i32>),
-    IntFixArray(Vec<i32>),
-
-    LongVarSizeArray(Vec<i64>),
-    LongBoundArray(Vec<i64>),
-    LongFixArray(Vec<i64>),
-
-    UByteVarSizeArray(Vec<u8>),
-    UByteBoundArray(Vec<u8>),
-    UByteFixArray(Vec<u8>),
-
-    UShortVarSizeArray(Vec<u16>),
-    UShortBoundArray(Vec<u16>),
-    UShortFixArray(Vec<u16>),
-
-    UIntVarSizeArray(Vec<u32>),
-    UIntBoundArray(Vec<u32>),
-    UIntFixArray(Vec<u32>),
-
-    ULongVarSizeArray(Vec<u64>),
-    ULongBoundArray(Vec<u64>),
-    ULongFixArray(Vec<u64>),
-
-    FloatVarSizeArray(Vec<f32>),
-    FloatBoundArray(Vec<f32>),
-    FloatFixArray(Vec<f32>),
-
-    DoubleVarSizeArray(Vec<f64>),
-    DoubleBoundArray(Vec<f64>),
-    DoubleFixArray(Vec<f64>),
-
-    StringVarSizeArray(Vec<String>),
-    StringBoundArray(Vec<String>),
-    StringFixArray(Vec<String>),
-
-    Structure(PvaStructureValue),
-    StructureVarSizeArray(Vec<PvaStructureValue>),
-
-    Union(PvaUnionValue),
-    VariantUnion(PvaUnionValue),
-    UnionVarSizeArray(Vec<PvaUnionValue>),
-    VariantUnionVarSizeArray(Vec<PvaUnionValue>),
-}
-
-pub type PvaStructureValue = Vec<PvaValue>;
-
-pub enum PvaUnionValue {
-    Null,
-    Selected {
-        index: Option<usize>,
-        name: Option<String>,
-        value: Box<PvaValue>,
-    },
 }
