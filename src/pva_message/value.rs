@@ -1,5 +1,3 @@
-// ---------------------- ?? ----------------------------------
-
 use crate::pva_message::{
     header::MsgEndian,
     primitive::{PvaElement, PvaSize},
@@ -89,9 +87,9 @@ pub struct PvaStructValue {
     fields: Vec<PvaValue>,
 }
 
-pub struct PvaUnionValue {
-    index: usize,
-    field: Box<PvaValue>,
+pub enum PvaUnionValue {
+    Null,
+    Selected { index: usize, field: Box<PvaValue> },
 }
 
 impl PvaElement for PvaStructValue {
@@ -222,12 +220,20 @@ impl PvaElement for PvaUnionValue {
             _ => return Err("PVA union value encoding requires PvaType::Union".to_string()),
         };
 
-        self.index.to_buf(buf, endian)?;
-        let field_type = typ
-            .fields
-            .get(self.index)
-            .ok_or_else(|| format!("Error: PVA union choice {} is out of range", self.index))?;
-        self.field.to_buf(field_type.typ.clone(), buf, endian)
+        match self {
+            PvaUnionValue::Null => {
+                buf.push(0xff);
+                return Ok(());
+            }
+            PvaUnionValue::Selected { index, field } => {
+                let field_type = typ
+                    .fields
+                    .get(*index)
+                    .ok_or_else(|| format!("Error: PVA union choice {} is out of range", index))?;
+                index.to_buf(buf, endian)?;
+                return field.to_buf(field_type.typ.clone(), buf, endian);
+            }
+        }
     }
 
     // union requires a type definition to decode the buffer
@@ -242,20 +248,30 @@ impl PvaElement for PvaUnionValue {
             _ => return Err("PVA union value decoding requires PvaType::Union".to_string()),
         };
 
-        // choice value
-        let index = usize::from_buf(buf, offset, endian)?;
-        // one value
-        let field_type = typ
-            .fields
-            .get(index)
-            .ok_or_else(|| format!("Error: PVA union choice {index} is out of range"))?;
+        // read the first byte
+        match buf.get(*offset) {
+            Some(first_byte) => {
+                if *first_byte == 0xff {
+                    *offset += 1;
+                    return Ok(PvaUnionValue::Null);
+                } else {
+                    // choice value
+                    let index = usize::from_buf(buf, offset, endian)?;
+                    // one value
+                    let field_type = typ.fields.get(index).ok_or_else(|| {
+                        format!("Error: PVA union choice {index} is out of range")
+                    })?;
 
-        let field = PvaValue::from_buf(&field_type.typ, buf, offset, endian)?;
+                    let field = PvaValue::from_buf(&field_type.typ, buf, offset, endian)?;
 
-        Ok(PvaUnionValue {
-            index: index,
-            field: Box::new(field),
-        })
+                    return Ok(PvaUnionValue::Selected {
+                        index: index,
+                        field: Box::new(field),
+                    });
+                }
+            }
+            None => return Err("Remaining buffer too short for PVA union selector".to_string()),
+        };
     }
 }
 impl PvaUnionValue {

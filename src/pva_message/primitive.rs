@@ -100,8 +100,7 @@ impl PvaSize for usize {
 
         let size = match first {
             PVA_SIZE_NULL => {
-                *offset += 1;
-                0 as usize
+                return Err("Failed to decode null (0xff) to a number".to_string());
             }
             0..=253 => {
                 *offset += 1;
@@ -158,6 +157,40 @@ impl PvaSize for usize {
         Ok(size)
     }
 }
+
+// /**
+//  * Only used for decoding Union value
+//  */
+// pub fn size_from_buf_with_null(
+//     buf: &[u8],
+//     offset: &mut usize,
+//     endian: MsgEndian,
+// ) -> Result<Option<usize>, String> {
+//     if let Some(value) = buf.get(*offset) {
+//         if *value == 0xff {
+//             *offset += 1;
+//             return Ok(None);
+//         }
+//     }
+//     let size = usize::from_buf(buf, offset, endian)?;
+//     return Ok(Some(size));
+// }
+
+// /**
+//  * Only used for encoding Union value
+//  */
+// pub fn size_to_buf_with_null(
+//     size: Option<usize>,
+//     buf: &mut Vec<u8>,
+//     endian: MsgEndian,
+// ) -> Result<(), String> {
+//     if let Some(size) = size {
+//         return size.to_buf(buf, endian);
+//     } else {
+//         buf.push(0xff);
+//         return Ok(());
+//     }
+// }
 
 impl PvaElement for bool {
     fn to_buf(&self, typ: &PvaType, buf: &mut Vec<u8>, _endian: MsgEndian) -> Result<(), String> {
