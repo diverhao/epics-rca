@@ -15,27 +15,27 @@ impl<T: PvaElement> PvaVarSizeArr<T> {
         &mut self.arr
     }
 
-    pub fn to_buf(self: &Self, endian: MsgEndian) -> Result<Vec<u8>, String> {
-        let mut buf = Vec::new();
-        self.arr().len().to_buf(&mut buf, endian)?;
-        for element in self.arr() {
-            element.to_buf(&mut buf, endian)?;
-        }
-        Ok(buf)
-    }
+    // pub fn to_buf(self: &Self, endian: MsgEndian) -> Result<Vec<u8>, String> {
+    //     let mut buf: Vec<u8> = vec!([]);
+    //     self.arr().len().to_buf(&mut buf, endian)?;
+    //     for element in self.arr() {
+    //         element.to_buf(&mut buf, endian)?;
+    //     }
+    //     Ok(buf)
+    // }
 
-    pub fn append_to_buf(
-        self: &Self,
-        buf: &mut Vec<u8>,
-        endian: MsgEndian,
-    ) -> Result<usize, String> {
-        let new_buf = match self.to_buf(endian) {
-            Ok(new_buf) => new_buf,
-            Err(err) => return Err(err),
-        };
-        buf.extend_from_slice(&new_buf);
-        Ok(new_buf.len())
-    }
+    // pub fn append_to_buf(
+    //     self: &Self,
+    //     buf: &mut Vec<u8>,
+    //     endian: MsgEndian,
+    // ) -> Result<usize, String> {
+    //     let new_buf = match self.to_buf(endian) {
+    //         Ok(new_buf) => new_buf,
+    //         Err(err) => return Err(err),
+    //     };
+    //     buf.extend_from_slice(&new_buf);
+    //     Ok(new_buf.len())
+    // }
 
     pub fn from_buf(
         buf: &[u8],
