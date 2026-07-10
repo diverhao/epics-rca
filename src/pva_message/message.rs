@@ -1,6 +1,6 @@
 // ---------------------- ?? ----------------------------------
 
-use crate::pva_message::{header::MsgEndian, typ::PvaElement};
+use crate::pva_message::{header::MsgEndian, primitive::PvaElement};
 
 pub struct PvaVarSizeArr<T: PvaElement> {
     pub arr: Vec<T>,
