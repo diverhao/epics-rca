@@ -176,7 +176,7 @@ impl PvaHeader {
         }
 
         let version = buf[1];
-        if version == 0 {
+        if version != 2 {
             return Err(String::from("Error: Invalid PVA version"));
         }
 

@@ -2,11 +2,15 @@
 
 use crate::pva_message::{
     header::MsgEndian,
-    primitive::PvaElement,
-    typ::{PvaStructType, PvaType, PvaUnionType},
+    primitive::{PvaElement, PvaSize},
+    typ::{
+        PvaStructType,
+        PvaType::{self, Boolean},
+        PvaUnionType,
+    },
 };
 
-enum PvaValue {
+pub enum PvaValue {
     Boolean(bool),       // 0x00, 0b 000 00 000
     Byte(i8),            // 0x20, 0b 001 00 000
     Short(i16),          // 0x21, 0b 001 00 001
@@ -69,11 +73,11 @@ enum PvaValue {
     StringBoundArray(Vec<String>), // 0x70, 0b 011 10 000 bound is in type, not in value, size is in value
     StringFixArray(Vec<String>),   // 0x78, 0b 011 11 000 size is in type, not in value
 
-    Struct(PvaStructValue),                  // 0x80, 0b 100 00 000
-    StructVarSizeArray(Vec<PvaStructValue>), // 0x88, 0b 100 01 000
+    Struct(PvaStructValue),                          // 0x80, 0b 100 00 000
+    StructVarSizeArray(Vec<Option<PvaStructValue>>), // 0x88, 0b 100 01 000
 
-    Union(PvaUnionValue),                  // 0x81, 0b 100 00 001
-    UnionVarSizeArray(Vec<PvaUnionValue>), // 0x89, 0b 100 01 001
+    Union(PvaUnionValue),                          // 0x81, 0b 100 00 001
+    UnionVarSizeArray(Vec<Option<PvaUnionValue>>), // 0x89, 0b 100 01 001
 
     // todo: need to implement
     VariantUnion,             // 0x82, 0b 100 00 010
@@ -84,52 +88,49 @@ pub struct PvaStructValue {
     fields: Vec<PvaValue>,
 }
 
-impl PvaElement for PvaStructValue {
-    fn to_buf(self: &Self, buf: &mut Vec<u8>, endian: MsgEndian) -> Result<(), String> {
-        for field in &self.fields {
-            field.to_buf(buf, endian)?;
-        }
-        Ok(())
-    }
-
-    // todo: implement it, but not used
-    fn from_buf(
-        buf: &[u8],
-        offset: &mut usize,
-        endian: MsgEndian,
-    ) -> Result<PvaStructValue, String> {
-        Err("".to_string())
-    }
-}
-
 pub struct PvaUnionValue {
     index: usize,
     field: Box<PvaValue>,
 }
 
-impl PvaElement for PvaUnionValue {
-    fn to_buf(self: &Self, buf: &mut Vec<u8>, endian: MsgEndian) -> Result<(), String> {
-        self.field.to_buf(buf, endian)?;
+impl PvaElement for PvaStructValue {
+    fn to_buf(
+        self: &Self,
+        typ: &PvaType,
+        buf: &mut Vec<u8>,
+        endian: MsgEndian,
+    ) -> Result<(), String> {
+        let typ = match typ {
+            PvaType::Struct(typ) => typ,
+            _ => return Err("PVA struct value encoding requires PvaType::Struct".to_string()),
+        };
+
+        if self.fields.len() != typ.fields.len() {
+            return Err(format!(
+                "PVA struct value field count {} does not match type field count {}",
+                self.fields.len(),
+                typ.fields.len()
+            ));
+        }
+
+        for (field, field_type) in self.fields.iter().zip(&typ.fields) {
+            field.to_buf(field_type.typ.clone(), buf, endian)?;
+        }
         Ok(())
     }
 
-    // todo: implement it, but not used
+    // struct requires a type definition to decode the buffer
     fn from_buf(
-        buf: &[u8],
-        offset: &mut usize,
-        endian: MsgEndian,
-    ) -> Result<PvaUnionValue, String> {
-        Err("".to_string())
-    }
-}
-
-impl PvaStructValue {
-    fn from_buf_1(
-        typ: &PvaStructType,
+        typ: &PvaType,
         buf: &[u8],
         offset: &mut usize,
         endian: MsgEndian,
     ) -> Result<PvaStructValue, String> {
+        let typ: &PvaStructType = match typ {
+            PvaType::Struct(typ) => typ,
+            _ => return Err("PVA struct value decoding requires PvaType::Struct".to_string()),
+        };
+
         let mut fields: Vec<PvaValue> = vec![];
         for field in &typ.fields {
             let value = PvaValue::from_buf(&field.typ, buf, offset, endian)?;
@@ -137,29 +138,109 @@ impl PvaStructValue {
         }
         Ok(PvaStructValue { fields: fields })
     }
+}
 
-    fn from_buf_array(
-        typ: &PvaStructType,
+impl PvaStructValue {
+    fn var_array_from_buf(
+        typ: &PvaType,
         buf: &[u8],
         offset: &mut usize,
         endian: MsgEndian,
-    ) -> Result<Vec<PvaStructValue>, String> {
+    ) -> Result<Vec<Option<PvaStructValue>>, String> {
+        let typ: &PvaStructType = match typ {
+            PvaType::StructVarSizeArray(typ) => typ,
+            _ => {
+                return Err(
+                    "PVA struct array decoding requires PvaType::StructVarSizeArray".to_string(),
+                );
+            }
+        };
+
         let size = usize::from_buf(buf, offset, endian)?;
-        let mut arr: Vec<PvaStructValue> = vec![];
+        let mut arr: Vec<Option<PvaStructValue>> = vec![];
         for ii in 0..size {
-            arr.push(PvaStructValue::from_buf_1(typ, buf, offset, endian)?);
+            let typ = typ.clone();
+            // read existance byte
+            let exist = bool::from_buf(&PvaType::Boolean, buf, offset, endian)?;
+            if exist {
+                arr.push(Some(PvaStructValue::from_buf(
+                    &PvaType::Struct(typ),
+                    buf,
+                    offset,
+                    endian,
+                )?));
+            } else {
+                // do nothing
+                arr.push(None);
+            }
         }
         Ok(arr)
     }
+
+    fn var_array_to_buf(
+        typ: &PvaType,
+        values: &[Option<PvaStructValue>],
+        buf: &mut Vec<u8>,
+        endian: MsgEndian,
+    ) -> Result<(), String> {
+        let typ: &PvaStructType = match typ {
+            PvaType::StructVarSizeArray(typ) => typ,
+            _ => {
+                return Err(
+                    "PVA struct array encoding requires PvaType::StructVarSizeArray".to_string(),
+                );
+            }
+        };
+
+        values.len().to_buf(buf, endian)?;
+        for value in values {
+            match value {
+                Some(value) => {
+                    let typ = typ.clone();
+                    true.to_buf(&PvaType::Boolean, buf, endian)?;
+                    value.to_buf(&PvaType::Struct(typ), buf, endian)?;
+                }
+                None => {
+                    false.to_buf(&PvaType::Boolean, buf, endian)?;
+                }
+            }
+        }
+        Ok(())
+    }
 }
 
-impl PvaUnionValue {
-    fn from_buf_1(
-        typ: &PvaUnionType,
+impl PvaElement for PvaUnionValue {
+    fn to_buf(
+        self: &Self,
+        typ: &PvaType,
+        buf: &mut Vec<u8>,
+        endian: MsgEndian,
+    ) -> Result<(), String> {
+        let typ = match typ {
+            PvaType::Union(typ) => typ,
+            _ => return Err("PVA union value encoding requires PvaType::Union".to_string()),
+        };
+
+        self.index.to_buf(buf, endian)?;
+        let field_type = typ
+            .fields
+            .get(self.index)
+            .ok_or_else(|| format!("Error: PVA union choice {} is out of range", self.index))?;
+        self.field.to_buf(field_type.typ.clone(), buf, endian)
+    }
+
+    // union requires a type definition to decode the buffer
+    fn from_buf(
+        typ: &PvaType,
         buf: &[u8],
         offset: &mut usize,
         endian: MsgEndian,
     ) -> Result<PvaUnionValue, String> {
+        let typ: &PvaUnionType = match typ {
+            PvaType::Union(typ) => typ,
+            _ => return Err("PVA union value decoding requires PvaType::Union".to_string()),
+        };
+
         // choice value
         let index = usize::from_buf(buf, offset, endian)?;
         // one value
@@ -175,30 +256,121 @@ impl PvaUnionValue {
             field: Box::new(field),
         })
     }
-
-    fn from_buf_array(
-        typ: &PvaUnionType,
+}
+impl PvaUnionValue {
+    fn var_array_from_buf(
+        typ: &PvaType,
         buf: &[u8],
         offset: &mut usize,
         endian: MsgEndian,
-    ) -> Result<Vec<PvaUnionValue>, String> {
+    ) -> Result<Vec<Option<PvaUnionValue>>, String> {
+        let typ = match typ {
+            PvaType::UnionVarSizeArray(typ) => typ,
+            _ => {
+                return Err(
+                    "PVA union array decoding requires PvaType::UnionVarSizeArray".to_string(),
+                );
+            }
+        };
+
         let size = usize::from_buf(buf, offset, endian)?;
-        let mut arr: Vec<PvaUnionValue> = vec![];
+        let mut arr: Vec<Option<PvaUnionValue>> = vec![];
         for ii in 0..size {
-            arr.push(PvaUnionValue::from_buf_1(typ, buf, offset, endian)?);
+            // read exitence byte
+            let exist = bool::from_buf(&PvaType::Boolean, buf, offset, endian)?;
+            if exist {
+                let typ = typ.clone();
+                arr.push(Some(PvaUnionValue::from_buf(
+                    &PvaType::Union(typ),
+                    buf,
+                    offset,
+                    endian,
+                )?));
+            } else {
+                arr.push(None);
+            }
         }
         Ok(arr)
     }
+
+    fn var_array_to_buf(
+        typ: &PvaType,
+        values: &[Option<PvaUnionValue>],
+        buf: &mut Vec<u8>,
+        endian: MsgEndian,
+    ) -> Result<(), String> {
+        let typ = match typ {
+            PvaType::UnionVarSizeArray(typ) => typ,
+            _ => {
+                return Err(
+                    "PVA union array encoding requires PvaType::UnionVarSizeArray".to_string(),
+                );
+            }
+        };
+
+        values.len().to_buf(buf, endian)?;
+        for value in values {
+            match value {
+                Some(value) => {
+                    let typ = typ.clone();
+                    // write 1 to indicate this element exists
+                    true.to_buf(&PvaType::Boolean, buf, endian)?;
+                    value.to_buf(&PvaType::Union(typ), buf, endian)?;
+                }
+                None => {
+                    false.to_buf(&PvaType::Boolean, buf, endian)?;
+                }
+            }
+        }
+        Ok(())
+    }
 }
 
-fn array_to_buf<T: PvaElement>(
+fn var_size_array_to_buf<T: PvaElement>(
     values: &[T],
     buf: &mut Vec<u8>,
     endian: MsgEndian,
 ) -> Result<(), String> {
+    let element_typ =
+        T::default_typ().ok_or_else(|| "PVA array element type is not known".to_string())?;
     values.len().to_buf(buf, endian)?;
     for value in values {
-        value.to_buf(buf, endian)?;
+        value.to_buf(&element_typ, buf, endian)?;
+    }
+    Ok(())
+}
+
+fn bounded_array_to_buf<T: PvaElement>(
+    bound: usize,
+    values: &[T],
+    buf: &mut Vec<u8>,
+    endian: MsgEndian,
+) -> Result<(), String> {
+    if values.len() > bound {
+        return Err("Bounded array oversize".to_string());
+    }
+    let element_typ =
+        T::default_typ().ok_or_else(|| "PVA array element type is not known".to_string())?;
+    values.len().to_buf(buf, endian)?;
+    for value in values {
+        value.to_buf(&element_typ, buf, endian)?;
+    }
+    Ok(())
+}
+
+fn fixed_array_to_buf<T: PvaElement>(
+    size: usize,
+    values: &[T],
+    buf: &mut Vec<u8>,
+    endian: MsgEndian,
+) -> Result<(), String> {
+    if values.len() != size {
+        return Err("Fixed size array not match".to_string());
+    }
+    let element_typ =
+        T::default_typ().ok_or_else(|| "PVA array element type is not known".to_string())?;
+    for value in values {
+        value.to_buf(&element_typ, buf, endian)?;
     }
     Ok(())
 }
@@ -209,9 +381,11 @@ fn array_from_buf<T: PvaElement>(
     offset: &mut usize,
     endian: MsgEndian,
 ) -> Result<Vec<T>, String> {
-    let mut values = Vec::with_capacity(len);
+    let element_typ =
+        T::default_typ().ok_or_else(|| "PVA array element type is not known".to_string())?;
+    let mut values = vec![];
     for _ in 0..len {
-        values.push(T::from_buf(buf, offset, endian)?);
+        values.push(T::from_buf(&element_typ, buf, offset, endian)?);
     }
     Ok(values)
 }
@@ -243,77 +417,302 @@ fn bound_array_from_buf<T: PvaElement>(
 
 impl PvaValue {
     // actually append_to_buf()
-    pub fn to_buf(self: &Self, buf: &mut Vec<u8>, endian: MsgEndian) -> Result<(), String> {
+    // Container variants still compare PvaValue and PvaType here.
+    pub fn to_buf(
+        self: &Self,
+        typ: PvaType,
+        buf: &mut Vec<u8>,
+        endian: MsgEndian,
+    ) -> Result<(), String> {
         match self {
-            PvaValue::Boolean(value) => value.to_buf(buf, endian),
-            PvaValue::Byte(value) => value.to_buf(buf, endian),
-            PvaValue::Short(value) => value.to_buf(buf, endian),
-            PvaValue::Int(value) => value.to_buf(buf, endian),
-            PvaValue::Long(value) => value.to_buf(buf, endian),
-            PvaValue::UByte(value) => value.to_buf(buf, endian),
-            PvaValue::UShort(value) => value.to_buf(buf, endian),
-            PvaValue::UInt(value) => value.to_buf(buf, endian),
-            PvaValue::ULong(value) => value.to_buf(buf, endian),
-            PvaValue::Float(value) => value.to_buf(buf, endian),
-            PvaValue::Double(value) => value.to_buf(buf, endian),
-            PvaValue::String(value) => value.to_buf(buf, endian),
-            PvaValue::BoundString(value) => value.to_buf(buf, endian),
+            PvaValue::Boolean(value) => value.to_buf(&typ, buf, endian),
+            PvaValue::Byte(value) => value.to_buf(&typ, buf, endian),
+            PvaValue::Short(value) => value.to_buf(&typ, buf, endian),
+            PvaValue::Int(value) => value.to_buf(&typ, buf, endian),
+            PvaValue::Long(value) => value.to_buf(&typ, buf, endian),
+            PvaValue::UByte(value) => value.to_buf(&typ, buf, endian),
+            PvaValue::UShort(value) => value.to_buf(&typ, buf, endian),
+            PvaValue::UInt(value) => value.to_buf(&typ, buf, endian),
+            PvaValue::ULong(value) => value.to_buf(&typ, buf, endian),
+            PvaValue::Float(value) => value.to_buf(&typ, buf, endian),
+            PvaValue::Double(value) => value.to_buf(&typ, buf, endian),
+            PvaValue::String(value) => match typ {
+                PvaType::String => value.to_buf(&typ, buf, endian),
+                _ => Err("PvaValue failed to encode: type not match".to_string()),
+            },
+            PvaValue::BoundString(value) => match typ {
+                PvaType::BoundString(bound) => {
+                    if value.len() > bound {
+                        return Err(format!(
+                            "PVA bound string length {} exceeds bound {}",
+                            value.len(),
+                            bound
+                        ));
+                    }
+                    value.to_buf(&PvaType::BoundString(bound), buf, endian)
+                }
+                _ => Err("PvaValue failed to encode: type not match".to_string()),
+            },
 
-            PvaValue::BooleanVarSizeArray(values)
-            | PvaValue::BooleanBoundArray(values)
-            | PvaValue::BooleanFixArray(values) => array_to_buf(values, buf, endian),
+            PvaValue::BooleanVarSizeArray(values) => match typ {
+                PvaType::BooleanVarSizeArray => var_size_array_to_buf(values, buf, endian),
+                _ => Err("PvaValue failed to encode: type not match".to_string()),
+            },
+            PvaValue::BooleanBoundArray(values) => {
+                let bound: usize = match typ {
+                    PvaType::BooleanBoundArray(bound) => bound,
+                    _ => return Err("PvaValue failed to encode: type not match".to_string()),
+                };
+                bounded_array_to_buf(bound, values, buf, endian)
+            }
+            PvaValue::BooleanFixArray(values) => {
+                let size: usize = match typ {
+                    PvaType::BooleanFixArray(size) => size,
+                    _ => return Err("PvaValue failed to encode: type not match".to_string()),
+                };
+                fixed_array_to_buf(size, values, buf, endian)
+            }
 
-            PvaValue::ByteVarSizeArray(values)
-            | PvaValue::ByteBoundArray(values)
-            | PvaValue::ByteFixArray(values) => array_to_buf(values, buf, endian),
+            PvaValue::ByteVarSizeArray(values) => match typ {
+                PvaType::ByteVarSizeArray => var_size_array_to_buf(values, buf, endian),
+                _ => Err("PvaValue failed to encode: type not match".to_string()),
+            },
+            PvaValue::ByteBoundArray(values) => {
+                let bound: usize = match typ {
+                    PvaType::ByteBoundArray(bound) => bound,
+                    _ => return Err("PvaValue failed to encode: type not match".to_string()),
+                };
+                bounded_array_to_buf(bound, values, buf, endian)
+            }
+            PvaValue::ByteFixArray(values) => {
+                let size: usize = match typ {
+                    PvaType::ByteFixArray(size) => size,
+                    _ => return Err("PvaValue failed to encode: type not match".to_string()),
+                };
+                fixed_array_to_buf(size, values, buf, endian)
+            }
 
-            PvaValue::ShortVarSizeArray(values)
-            | PvaValue::ShortBoundArray(values)
-            | PvaValue::ShortFixArray(values) => array_to_buf(values, buf, endian),
+            PvaValue::ShortVarSizeArray(values) => match typ {
+                PvaType::ShortVarSizeArray => var_size_array_to_buf(values, buf, endian),
+                _ => Err("PvaValue failed to encode: type not match".to_string()),
+            },
+            PvaValue::ShortBoundArray(values) => {
+                let bound: usize = match typ {
+                    PvaType::ShortBoundArray(bound) => bound,
+                    _ => return Err("PvaValue failed to encode: type not match".to_string()),
+                };
+                bounded_array_to_buf(bound, values, buf, endian)
+            }
+            PvaValue::ShortFixArray(values) => {
+                let size: usize = match typ {
+                    PvaType::ShortFixArray(size) => size,
+                    _ => return Err("PvaValue failed to encode: type not match".to_string()),
+                };
+                fixed_array_to_buf(size, values, buf, endian)
+            }
 
-            PvaValue::IntVarSizeArray(values)
-            | PvaValue::IntBoundArray(values)
-            | PvaValue::IntFixArray(values) => array_to_buf(values, buf, endian),
+            PvaValue::IntVarSizeArray(values) => match typ {
+                PvaType::IntVarSizeArray => var_size_array_to_buf(values, buf, endian),
+                _ => Err("PvaValue failed to encode: type not match".to_string()),
+            },
+            PvaValue::IntBoundArray(values) => {
+                let bound: usize = match typ {
+                    PvaType::IntBoundArray(bound) => bound,
+                    _ => return Err("PvaValue failed to encode: type not match".to_string()),
+                };
+                bounded_array_to_buf(bound, values, buf, endian)
+            }
+            PvaValue::IntFixArray(values) => {
+                let size: usize = match typ {
+                    PvaType::IntFixArray(size) => size,
+                    _ => return Err("PvaValue failed to encode: type not match".to_string()),
+                };
+                fixed_array_to_buf(size, values, buf, endian)
+            }
 
-            PvaValue::LongVarSizeArray(values)
-            | PvaValue::LongBoundArray(values)
-            | PvaValue::LongFixArray(values) => array_to_buf(values, buf, endian),
+            PvaValue::LongVarSizeArray(values) => match typ {
+                PvaType::LongVarSizeArray => var_size_array_to_buf(values, buf, endian),
+                _ => Err("PvaValue failed to encode: type not match".to_string()),
+            },
+            PvaValue::LongBoundArray(values) => {
+                let bound: usize = match typ {
+                    PvaType::LongBoundArray(bound) => bound,
+                    _ => return Err("PvaValue failed to encode: type not match".to_string()),
+                };
+                bounded_array_to_buf(bound, values, buf, endian)
+            }
+            PvaValue::LongFixArray(values) => {
+                let size: usize = match typ {
+                    PvaType::LongFixArray(size) => size,
+                    _ => return Err("PvaValue failed to encode: type not match".to_string()),
+                };
+                fixed_array_to_buf(size, values, buf, endian)
+            }
 
-            PvaValue::UByteVarSizeArray(values)
-            | PvaValue::UByteBoundArray(values)
-            | PvaValue::UByteFixArray(values) => array_to_buf(values, buf, endian),
+            PvaValue::UByteVarSizeArray(values) => match typ {
+                PvaType::UByteVarSizeArray => var_size_array_to_buf(values, buf, endian),
+                _ => Err("PvaValue failed to encode: type not match".to_string()),
+            },
+            PvaValue::UByteBoundArray(values) => {
+                let bound: usize = match typ {
+                    PvaType::UByteBoundArray(bound) => bound,
+                    _ => return Err("PvaValue failed to encode: type not match".to_string()),
+                };
+                bounded_array_to_buf(bound, values, buf, endian)
+            }
+            PvaValue::UByteFixArray(values) => {
+                let size: usize = match typ {
+                    PvaType::UByteFixArray(size) => size,
+                    _ => return Err("PvaValue failed to encode: type not match".to_string()),
+                };
+                fixed_array_to_buf(size, values, buf, endian)
+            }
 
-            PvaValue::UShortVarSizeArray(values)
-            | PvaValue::UShortBoundArray(values)
-            | PvaValue::UShortFixArray(values) => array_to_buf(values, buf, endian),
+            PvaValue::UShortVarSizeArray(values) => match typ {
+                PvaType::UShortVarSizeArray => var_size_array_to_buf(values, buf, endian),
+                _ => Err("PvaValue failed to encode: type not match".to_string()),
+            },
+            PvaValue::UShortBoundArray(values) => {
+                let bound: usize = match typ {
+                    PvaType::UShortBoundArray(bound) => bound,
+                    _ => return Err("PvaValue failed to encode: type not match".to_string()),
+                };
+                bounded_array_to_buf(bound, values, buf, endian)
+            }
+            PvaValue::UShortFixArray(values) => {
+                let size: usize = match typ {
+                    PvaType::UShortFixArray(size) => size,
+                    _ => return Err("PvaValue failed to encode: type not match".to_string()),
+                };
+                fixed_array_to_buf(size, values, buf, endian)
+            }
 
-            PvaValue::UIntVarSizeArray(values)
-            | PvaValue::UIntBoundArray(values)
-            | PvaValue::UIntFixArray(values) => array_to_buf(values, buf, endian),
+            PvaValue::UIntVarSizeArray(values) => match typ {
+                PvaType::UIntVarSizeArray => var_size_array_to_buf(values, buf, endian),
+                _ => Err("PvaValue failed to encode: type not match".to_string()),
+            },
+            PvaValue::UIntBoundArray(values) => {
+                let bound: usize = match typ {
+                    PvaType::UIntBoundArray(bound) => bound,
+                    _ => return Err("PvaValue failed to encode: type not match".to_string()),
+                };
+                bounded_array_to_buf(bound, values, buf, endian)
+            }
+            PvaValue::UIntFixArray(values) => {
+                let size: usize = match typ {
+                    PvaType::UIntFixArray(size) => size,
+                    _ => return Err("PvaValue failed to encode: type not match".to_string()),
+                };
+                fixed_array_to_buf(size, values, buf, endian)
+            }
 
-            PvaValue::ULongVarSizeArray(values)
-            | PvaValue::ULongBoundArray(values)
-            | PvaValue::ULongFixArray(values) => array_to_buf(values, buf, endian),
+            PvaValue::ULongVarSizeArray(values) => match typ {
+                PvaType::ULongVarSizeArray => var_size_array_to_buf(values, buf, endian),
+                _ => Err("PvaValue failed to encode: type not match".to_string()),
+            },
+            PvaValue::ULongBoundArray(values) => {
+                let bound: usize = match typ {
+                    PvaType::ULongBoundArray(bound) => bound,
+                    _ => return Err("PvaValue failed to encode: type not match".to_string()),
+                };
+                bounded_array_to_buf(bound, values, buf, endian)
+            }
+            PvaValue::ULongFixArray(values) => {
+                let size: usize = match typ {
+                    PvaType::ULongFixArray(size) => size,
+                    _ => return Err("PvaValue failed to encode: type not match".to_string()),
+                };
+                fixed_array_to_buf(size, values, buf, endian)
+            }
 
-            PvaValue::FloatVarSizeArray(values)
-            | PvaValue::FloatBoundArray(values)
-            | PvaValue::FloatFixArray(values) => array_to_buf(values, buf, endian),
+            PvaValue::FloatVarSizeArray(values) => match typ {
+                PvaType::FloatVarSizeArray => var_size_array_to_buf(values, buf, endian),
+                _ => Err("PvaValue failed to encode: type not match".to_string()),
+            },
+            PvaValue::FloatBoundArray(values) => {
+                let bound: usize = match typ {
+                    PvaType::FloatBoundArray(bound) => bound,
+                    _ => return Err("PvaValue failed to encode: type not match".to_string()),
+                };
+                bounded_array_to_buf(bound, values, buf, endian)
+            }
+            PvaValue::FloatFixArray(values) => {
+                let size: usize = match typ {
+                    PvaType::FloatFixArray(size) => size,
+                    _ => return Err("PvaValue failed to encode: type not match".to_string()),
+                };
+                fixed_array_to_buf(size, values, buf, endian)
+            }
 
-            PvaValue::DoubleVarSizeArray(values)
-            | PvaValue::DoubleBoundArray(values)
-            | PvaValue::DoubleFixArray(values) => array_to_buf(values, buf, endian),
+            PvaValue::DoubleVarSizeArray(values) => match typ {
+                PvaType::DoubleVarSizeArray => var_size_array_to_buf(values, buf, endian),
+                _ => Err("PvaValue failed to encode: type not match".to_string()),
+            },
+            PvaValue::DoubleBoundArray(values) => {
+                let bound: usize = match typ {
+                    PvaType::DoubleBoundArray(bound) => bound,
+                    _ => return Err("PvaValue failed to encode: type not match".to_string()),
+                };
+                bounded_array_to_buf(bound, values, buf, endian)
+            }
+            PvaValue::DoubleFixArray(values) => {
+                let size: usize = match typ {
+                    PvaType::DoubleFixArray(size) => size,
+                    _ => return Err("PvaValue failed to encode: type not match".to_string()),
+                };
+                fixed_array_to_buf(size, values, buf, endian)
+            }
 
-            PvaValue::StringVarSizeArray(values)
-            | PvaValue::StringBoundArray(values)
-            | PvaValue::StringFixArray(values) => array_to_buf(values, buf, endian),
+            PvaValue::StringVarSizeArray(values) => match typ {
+                PvaType::StringVarSizeArray => var_size_array_to_buf(values, buf, endian),
+                _ => Err("PvaValue failed to encode: type not match".to_string()),
+            },
+            PvaValue::StringBoundArray(values) => {
+                let bound: usize = match typ {
+                    PvaType::StringBoundArray(bound) => bound,
+                    _ => return Err("PvaValue failed to encode: type not match".to_string()),
+                };
+                bounded_array_to_buf(bound, values, buf, endian)
+            }
+            PvaValue::StringFixArray(values) => {
+                let size: usize = match typ {
+                    PvaType::StringFixArray(size) => size,
+                    _ => return Err("PvaValue failed to encode: type not match".to_string()),
+                };
+                fixed_array_to_buf(size, values, buf, endian)
+            }
 
-            PvaValue::Struct(value) => value.to_buf(buf, endian),
+            PvaValue::Struct(value) => {
+                match typ {
+                    PvaType::Struct(_) => {}
+                    _ => return Err("PvaValue failed to encode: type not match".to_string()),
+                };
+                value.to_buf(&typ, buf, endian)
+            }
 
-            PvaValue::StructVarSizeArray(values) => array_to_buf(values, buf, endian),
+            PvaValue::StructVarSizeArray(values) => {
+                match typ {
+                    PvaType::StructVarSizeArray(_) => {}
+                    _ => return Err("PvaValue failed to encode: type not match".to_string()),
+                };
+                PvaStructValue::var_array_to_buf(&typ, values, buf, endian)
+            }
 
-            PvaValue::Union(value) => value.to_buf(buf, endian),
+            PvaValue::Union(value) => {
+                match typ {
+                    PvaType::Union(_) => {}
+                    _ => return Err("PvaValue failed to encode: type not match".to_string()),
+                };
+                value.to_buf(&typ, buf, endian)
+            }
 
-            PvaValue::UnionVarSizeArray(values) => array_to_buf(values, buf, endian),
+            PvaValue::UnionVarSizeArray(values) => {
+                match typ {
+                    PvaType::UnionVarSizeArray(_) => {}
+                    _ => return Err("PvaValue failed to encode: type not match".to_string()),
+                };
+                PvaUnionValue::var_array_to_buf(&typ, values, buf, endian)
+            }
 
             // todo: implement it
             PvaValue::VariantUnion | PvaValue::VariantUnionVarSizeArray => {
@@ -330,20 +729,28 @@ impl PvaValue {
         endian: MsgEndian,
     ) -> Result<Self, String> {
         let result = match typ {
-            PvaType::Boolean => PvaValue::Boolean(bool::from_buf(buf, offset, endian)?),
-            PvaType::Byte => PvaValue::Byte(i8::from_buf(buf, offset, endian)?),
-            PvaType::Short => PvaValue::Short(i16::from_buf(buf, offset, endian)?),
-            PvaType::Int => PvaValue::Int(i32::from_buf(buf, offset, endian)?),
-            PvaType::Long => PvaValue::Long(i64::from_buf(buf, offset, endian)?),
-            PvaType::UByte => PvaValue::UByte(u8::from_buf(buf, offset, endian)?),
-            PvaType::UShort => PvaValue::UShort(u16::from_buf(buf, offset, endian)?),
-            PvaType::UInt => PvaValue::UInt(u32::from_buf(buf, offset, endian)?),
-            PvaType::ULong => PvaValue::ULong(u64::from_buf(buf, offset, endian)?),
-            PvaType::Float => PvaValue::Float(f32::from_buf(buf, offset, endian)?),
-            PvaType::Double => PvaValue::Double(f64::from_buf(buf, offset, endian)?),
-            PvaType::String => PvaValue::String(String::from_buf(buf, offset, endian)?),
+            PvaType::Boolean => {
+                PvaValue::Boolean(bool::from_buf(&PvaType::Boolean, buf, offset, endian)?)
+            }
+            PvaType::Byte => PvaValue::Byte(i8::from_buf(&PvaType::Byte, buf, offset, endian)?),
+            PvaType::Short => PvaValue::Short(i16::from_buf(&PvaType::Short, buf, offset, endian)?),
+            PvaType::Int => PvaValue::Int(i32::from_buf(&PvaType::Int, buf, offset, endian)?),
+            PvaType::Long => PvaValue::Long(i64::from_buf(&PvaType::Long, buf, offset, endian)?),
+            PvaType::UByte => PvaValue::UByte(u8::from_buf(&PvaType::UByte, buf, offset, endian)?),
+            PvaType::UShort => {
+                PvaValue::UShort(u16::from_buf(&PvaType::UShort, buf, offset, endian)?)
+            }
+            PvaType::UInt => PvaValue::UInt(u32::from_buf(&PvaType::UInt, buf, offset, endian)?),
+            PvaType::ULong => PvaValue::ULong(u64::from_buf(&PvaType::ULong, buf, offset, endian)?),
+            PvaType::Float => PvaValue::Float(f32::from_buf(&PvaType::Float, buf, offset, endian)?),
+            PvaType::Double => {
+                PvaValue::Double(f64::from_buf(&PvaType::Double, buf, offset, endian)?)
+            }
+            PvaType::String => {
+                PvaValue::String(String::from_buf(&PvaType::String, buf, offset, endian)?)
+            }
             PvaType::BoundString(bound) => {
-                let value = String::from_buf(buf, offset, endian)?;
+                let value = String::from_buf(&PvaType::BoundString(*bound), buf, offset, endian)?;
                 if value.len() > *bound {
                     return Err(format!(
                         "Error: PVA bound string length {} exceeds bound {}",
@@ -474,20 +881,20 @@ impl PvaValue {
                 PvaValue::StringFixArray(array_from_buf(*len, buf, offset, endian)?)
             }
 
-            PvaType::Struct(typ) => {
-                PvaValue::Struct(PvaStructValue::from_buf_1(&typ, buf, offset, endian)?)
+            PvaType::Struct(_) => {
+                PvaValue::Struct(PvaStructValue::from_buf(&typ, buf, offset, endian)?)
             }
 
-            PvaType::StructVarSizeArray(typ) => PvaValue::StructVarSizeArray(
-                PvaStructValue::from_buf_array(&typ, buf, offset, endian)?,
+            PvaType::StructVarSizeArray(_) => PvaValue::StructVarSizeArray(
+                PvaStructValue::var_array_from_buf(&typ, buf, offset, endian)?,
             ),
 
-            PvaType::Union(typ) => {
-                PvaValue::Union(PvaUnionValue::from_buf_1(&typ, buf, offset, endian)?)
+            PvaType::Union(_) => {
+                PvaValue::Union(PvaUnionValue::from_buf(&typ, buf, offset, endian)?)
             }
 
-            PvaType::UnionVarSizeArray(typ) => PvaValue::UnionVarSizeArray(
-                PvaUnionValue::from_buf_array(&typ, buf, offset, endian)?,
+            PvaType::UnionVarSizeArray(_) => PvaValue::UnionVarSizeArray(
+                PvaUnionValue::var_array_from_buf(&typ, buf, offset, endian)?,
             ),
 
             PvaType::VariantUnion | PvaType::VariantUnionVarSizeArray => {

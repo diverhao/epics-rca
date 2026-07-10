@@ -1,6 +1,7 @@
-use core::num;
-
-use crate::pva_message::{header::MsgEndian, primitive::PvaElement};
+use crate::pva_message::{
+    header::MsgEndian,
+    primitive::{PvaElement, PvaSize},
+};
 
 // ------------------- size -----------------
 
@@ -88,7 +89,7 @@ impl PvaType {
     // a wrapper
     pub fn from_buf(buf: &[u8], offset: &mut usize, endian: MsgEndian) -> Result<PvaType, String> {
         // do not consume the first byte
-        let form = match buf.first() {
+        let form = match buf.get(*offset) {
             Some(form) => *form,
             None => return Err("Buffer empty".to_string()),
         };
@@ -104,9 +105,9 @@ impl PvaType {
             // type ID and type def
             FULL_WITH_ID_TYPE_CODE => {
                 // consume 0xFD
-                u8::from_buf(buf, offset, endian)?;
+                u8::from_buf(&PvaType::UByte, buf, offset, endian)?;
                 // type ID
-                let id = i16::from_buf(buf, offset, endian)?;
+                let id = i16::from_buf(&PvaType::Short, buf, offset, endian)?;
                 // todo: register type
                 return Self::from_buf_body(buf, offset, endian);
             }
@@ -127,7 +128,7 @@ impl PvaType {
         offset: &mut usize,
         endian: MsgEndian,
     ) -> Result<Self, String> {
-        let code = u8::from_buf(buf, offset, endian)?;
+        let code = u8::from_buf(&PvaType::UByte, buf, offset, endian)?;
 
         let pva_type = match code {
             0x00 => PvaType::Boolean,
@@ -399,7 +400,7 @@ impl PvaStructType {
         buf.push(0x80);
 
         // struct ID string
-        self.id.to_buf(buf, endian)?;
+        self.id.to_buf(&PvaType::String, buf, endian)?;
 
         // number of fields
         self.fields.len().to_buf(buf, endian)?;
@@ -418,10 +419,13 @@ impl PvaStructType {
         endian: MsgEndian,
     ) -> Result<PvaStructType, String> {
         // consume and verify 0x80
-        let code = u8::from_buf(buf, offset, endian)?;
+        let code = u8::from_buf(&PvaType::UByte, buf, offset, endian)?;
+        if code != 0x80 {
+            return Err("Error decoding struct type, code is not 0x80".to_string());
+        }
 
         // struct ID string, decode like variable size string
-        let id = String::from_buf(buf, offset, endian)?;
+        let id = String::from_buf(&PvaType::String, buf, offset, endian)?;
 
         // number of fields, encoded as PvaSize
         let num_fields = usize::from_buf(buf, offset, endian)?;
@@ -449,7 +453,7 @@ pub struct PvaFieldType {
 impl PvaFieldType {
     pub fn to_buf(self: &Self, buf: &mut Vec<u8>, endian: MsgEndian) -> Result<(), String> {
         let name = &self.name;
-        name.to_buf(buf, endian)?;
+        name.to_buf(&PvaType::String, buf, endian)?;
 
         let typ = &self.typ;
         typ.to_buf(buf, endian)?;
@@ -458,7 +462,7 @@ impl PvaFieldType {
 
     pub fn from_buf(buf: &[u8], offset: &mut usize, endian: MsgEndian) -> Result<Self, String> {
         // field name
-        let name = String::from_buf(buf, offset, endian)?;
+        let name = String::from_buf(&PvaType::String, buf, offset, endian)?;
 
         // field type
         let typ = PvaType::from_buf(buf, offset, endian)?;
@@ -485,7 +489,7 @@ impl PvaUnionType {
         buf.push(0x81);
 
         // union ID string
-        self.id.to_buf(buf, endian)?;
+        self.id.to_buf(&PvaType::String, buf, endian)?;
 
         // number of fields
         self.fields.len().to_buf(buf, endian)?;
@@ -500,10 +504,13 @@ impl PvaUnionType {
 
     fn from_buf(buf: &[u8], offset: &mut usize, endian: MsgEndian) -> Result<PvaUnionType, String> {
         // consume 0x81
-        let code = u8::from_buf(buf, offset, endian)?;
+        let code = u8::from_buf(&PvaType::UByte, buf, offset, endian)?;
+        if code != 0x81 {
+            return Err("Error decoding union type, code is not 0x81".to_string());
+        }
 
         // union ID string, decode like variable size string
-        let id = String::from_buf(buf, offset, endian)?;
+        let id = String::from_buf(&PvaType::String, buf, offset, endian)?;
 
         // number of fields, encoded as PvaSize
         let num_fields = usize::from_buf(buf, offset, endian)?;
