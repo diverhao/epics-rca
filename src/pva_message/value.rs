@@ -11,6 +11,7 @@ use crate::pva_message::{
 };
 
 pub enum PvaValue {
+    Null,                // special type, no data
     Boolean(bool),       // 0x00, 0b 000 00 000
     Byte(i8),            // 0x20, 0b 001 00 000
     Short(i16),          // 0x21, 0b 001 00 001
@@ -425,6 +426,7 @@ impl PvaValue {
         endian: MsgEndian,
     ) -> Result<(), String> {
         match self {
+            PvaValue::Null => Ok(()),
             PvaValue::Boolean(value) => value.to_buf(&typ, buf, endian),
             PvaValue::Byte(value) => value.to_buf(&typ, buf, endian),
             PvaValue::Short(value) => value.to_buf(&typ, buf, endian),
@@ -729,6 +731,7 @@ impl PvaValue {
         endian: MsgEndian,
     ) -> Result<Self, String> {
         let result = match typ {
+            PvaType::Null => PvaValue::Null,
             PvaType::Boolean => {
                 PvaValue::Boolean(bool::from_buf(&PvaType::Boolean, buf, offset, endian)?)
             }

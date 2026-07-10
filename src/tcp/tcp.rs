@@ -2,9 +2,12 @@ use crate::ca_channel;
 use crate::ca_message::message::CaMsg;
 use crate::ca_message::message_handler::handle_tcp_msgs;
 use crate::context::context::get_context;
+use crate::pva_message::typ::PvaType;
+use crate::pva_message::type_registry::PvaTypeRegistry;
 use log::debug;
 use log::error;
 use log::warn;
+use std::collections::HashMap;
 use std::collections::HashSet;
 use std::collections::VecDeque;
 use std::collections::vec_deque;
@@ -50,6 +53,8 @@ pub struct TCP {
     alive: AtomicBool,
     paused: AtomicBool,
     queue_msg_send: RwLock<VecDeque<CaMsg>>,
+    pva_types_in: RwLock<PvaTypeRegistry>,
+    pva_types_out: RwLock<PvaTypeRegistry>,
 }
 
 impl TCP {
@@ -334,6 +339,22 @@ impl TCP {
         self.cids.write().unwrap()
     }
 
+    pub fn pva_types_in(self: &Self) -> RwLockReadGuard<'_, PvaTypeRegistry> {
+        self.pva_types_in.read().unwrap()
+    }
+
+    pub fn pva_types_out(self: &Self) -> RwLockReadGuard<'_, PvaTypeRegistry> {
+        self.pva_types_out.read().unwrap()
+    }
+
+    pub fn pva_types_in_mut(self: &Self) -> RwLockWriteGuard<'_, PvaTypeRegistry> {
+        self.pva_types_in.write().unwrap()
+    }
+
+    pub fn pva_types_out_mut(self: &Self) -> RwLockWriteGuard<'_, PvaTypeRegistry> {
+        self.pva_types_out.write().unwrap()
+    }
+
     pub async fn start_check_alive(self: Arc<Self>) {
         let mut task = self.check_alive_task.lock().await;
         if task.is_some() {
@@ -585,6 +606,8 @@ impl TCPs {
                         alive: AtomicBool::new(true),
                         paused: AtomicBool::new(false),
                         queue_msg_send: RwLock::new(VecDeque::from([])),
+                        pva_types_in: RwLock::new(PvaTypeRegistry::new()),
+                        pva_types_out: RwLock::new(PvaTypeRegistry::new()),
                     });
                     tcp.set_state(TcpState::Connecting);
                     connecting.push(Arc::clone(&tcp));

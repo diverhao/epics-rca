@@ -1,6 +1,9 @@
-use crate::pva_message::{
-    header::MsgEndian,
-    primitive::{PvaElement, PvaSize},
+use crate::{
+    pva_message::{
+        header::MsgEndian,
+        primitive::{PvaElement, PvaSize}, type_registry::PvaTypeRegistry,
+    },
+    tcp::tcp::TCP,
 };
 
 // ------------------- size -----------------
@@ -13,6 +16,7 @@ const FULL_TAGGED_ID_TYPE_CODE: u8 = 0xfc;
 // --------------- PVA type --------------
 #[derive(Debug, Clone)]
 pub enum PvaType {
+    Null,               // special type, with 0xff wrapper code
     Boolean,            // 0x00, 0b 000 00 000
     Byte,               // 0x20, 0b 001 00 000
     Short,              // 0x21, 0b 001 00 001
@@ -86,47 +90,12 @@ pub enum PvaType {
 }
 
 impl PvaType {
-    // a wrapper
-    pub fn from_buf(buf: &[u8], offset: &mut usize, endian: MsgEndian) -> Result<PvaType, String> {
-        // do not consume the first byte
-        let form = match buf.get(*offset) {
-            Some(form) => *form,
-            None => return Err("Buffer empty".to_string()),
-        };
-
-        match form {
-            // todo: what to do? how to name it
-            NULL_TYPE_CODE => return Err("".to_string()),
-
-            ONLY_ID_TYPE_CODE => {
-                // todo: look for type from registry
-                return Err("".to_string());
-            }
-            // type ID and type def
-            FULL_WITH_ID_TYPE_CODE => {
-                // consume 0xFD
-                u8::from_buf(&PvaType::UByte, buf, offset, endian)?;
-                // type ID
-                let id = i16::from_buf(&PvaType::Short, buf, offset, endian)?;
-                // todo: register type
-                return Self::from_buf_body(buf, offset, endian);
-            }
-            // not implemented
-            FULL_TAGGED_ID_TYPE_CODE => {
-                return Err("FULL_TAGGED_ID_TYPE_CODE not implemented".to_string());
-            }
-            // direct type def
-            _ => {
-                return Self::from_buf_body(buf, offset, endian);
-            }
-        };
-    }
-
     // real decoder, the part after type code and type id
-    pub fn from_buf_body(
+    pub fn from_buf(
         buf: &[u8],
         offset: &mut usize,
         endian: MsgEndian,
+        registry: &mut PvaTypeRegistry,
     ) -> Result<Self, String> {
         let code = u8::from_buf(&PvaType::UByte, buf, offset, endian)?;
 
@@ -194,19 +163,67 @@ impl PvaType {
             0x70 => PvaType::StringBoundArray(usize::from_buf(buf, offset, endian)?),
             0x78 => PvaType::StringFixArray(usize::from_buf(buf, offset, endian)?),
 
+            0xff => PvaType::Null,
+
+            0xfe => {
+                // 0xfe + type ID, read type from cache
+                let id = i16::from_buf(&PvaType::Short, buf, offset, endian)?;
+                let typ = match registry.typ(id) {
+                    Some(typ) => typ,
+                    None => return Err(format!("Cannot find type with ID {id} in registry")),
+                };
+                return Ok(typ.clone());
+            }
+            0xfd => {
+                // 0xfd + type ID + type
+                let id = i16::from_buf(&PvaType::Short, buf, offset, endian)?;
+                let typ = PvaType::from_buf(buf, offset, endian, registry)?;
+                // register ID
+                registry.add(id, typ.clone());
+                return Ok(typ);
+            }
+
+            0xfc => {
+                return Err("0xfc + ID + tag + FieldDesc not supported".to_string());
+            }
+
             0x80 => {
                 // retract by 1 for 0x80
                 *offset -= 1;
-                PvaType::Struct(PvaStructType::from_buf(buf, offset, endian)?)
+                PvaType::Struct(PvaStructType::from_buf(buf, offset, endian, registry)?)
             }
-            0x88 => PvaType::StructVarSizeArray(PvaStructType::from_buf(buf, offset, endian)?),
+
+            0x88 => {
+                let pva_type = PvaType::from_buf(buf, offset, endian, registry)?;
+                let struct_type = match pva_type {
+                    PvaType::Struct(struct_type) => struct_type,
+                    other => {
+                        return Err(format!(
+                            "Error: PVA structure array type code 0x88 requires a structure element type, got {other:?}"
+                        ));
+                    }
+                };
+                return Ok(PvaType::StructVarSizeArray(struct_type));
+            }
 
             0x81 => {
                 // retract by 1 for 0x81
                 *offset -= 1;
-                PvaType::Union(PvaUnionType::from_buf(buf, offset, endian)?)
+                PvaType::Union(PvaUnionType::from_buf(buf, offset, endian, registry)?)
             }
-            0x89 => PvaType::UnionVarSizeArray(PvaUnionType::from_buf(buf, offset, endian)?),
+
+            0x89 => {
+                let pva_type = PvaType::from_buf(buf, offset, endian, registry)?;
+                let union_type = match pva_type {
+                    PvaType::Union(union_type) => union_type,
+                    other => {
+                        return Err(format!(
+                            "Error: PVA union array type code 0x89 requires a union element type, got {other:?}"
+                        ));
+                    }
+                };
+                return Ok(PvaType::UnionVarSizeArray(union_type));
+            }
 
             0x82 | 0x8A => {
                 return Err(format!(
@@ -223,6 +240,7 @@ impl PvaType {
     // actually append_to_buf()
     pub fn to_buf(self: &Self, buf: &mut Vec<u8>, endian: MsgEndian) -> Result<(), String> {
         match self {
+            Self::Null => buf.push(0xff),
             Self::Boolean => buf.push(0x00),
             Self::Byte => buf.push(0x20),
             Self::Short => buf.push(0x21),
@@ -417,6 +435,7 @@ impl PvaStructType {
         buf: &[u8],
         offset: &mut usize,
         endian: MsgEndian,
+        registry: &mut PvaTypeRegistry,
     ) -> Result<PvaStructType, String> {
         // consume and verify 0x80
         let code = u8::from_buf(&PvaType::UByte, buf, offset, endian)?;
@@ -433,7 +452,7 @@ impl PvaStructType {
         // fields type: field name + pva type
         let mut fields: Vec<PvaFieldType> = vec![];
         for _ in 0..num_fields {
-            let field_type = PvaFieldType::from_buf(buf, offset, endian)?;
+            let field_type = PvaFieldType::from_buf(buf, offset, endian, registry)?;
             fields.push(field_type);
         }
 
@@ -460,12 +479,17 @@ impl PvaFieldType {
         Ok(())
     }
 
-    pub fn from_buf(buf: &[u8], offset: &mut usize, endian: MsgEndian) -> Result<Self, String> {
+    pub fn from_buf(
+        buf: &[u8],
+        offset: &mut usize,
+        endian: MsgEndian,
+        registry: &mut PvaTypeRegistry,
+    ) -> Result<Self, String> {
         // field name
         let name = String::from_buf(&PvaType::String, buf, offset, endian)?;
 
         // field type
-        let typ = PvaType::from_buf(buf, offset, endian)?;
+        let typ = PvaType::from_buf(buf, offset, endian, registry)?;
 
         Ok(PvaFieldType {
             name: name,
@@ -502,7 +526,12 @@ impl PvaUnionType {
         Ok(())
     }
 
-    fn from_buf(buf: &[u8], offset: &mut usize, endian: MsgEndian) -> Result<PvaUnionType, String> {
+    fn from_buf(
+        buf: &[u8],
+        offset: &mut usize,
+        endian: MsgEndian,
+        registry: &mut PvaTypeRegistry,
+    ) -> Result<PvaUnionType, String> {
         // consume 0x81
         let code = u8::from_buf(&PvaType::UByte, buf, offset, endian)?;
         if code != 0x81 {
@@ -518,7 +547,7 @@ impl PvaUnionType {
         // fields type: field name + pva type
         let mut fields: Vec<PvaFieldType> = vec![];
         for _ in 0..num_fields {
-            let field_type = PvaFieldType::from_buf(buf, offset, endian)?;
+            let field_type = PvaFieldType::from_buf(buf, offset, endian, registry)?;
             fields.push(field_type);
         }
 
