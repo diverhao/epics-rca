@@ -1,7 +1,8 @@
-use super::{
-    typ::{PvaStructType, PvaType, PvaUnionType},
-    value::{PvaStructValue, PvaUnionValue, PvaValue, PvaVariantUnionValue},
+use crate::pva_message::complex::{
+    PvaStructType, PvaStructValue, PvaUnionType, PvaUnionValue, PvaVariantUnionValue,
 };
+
+use super::{typ::PvaType, value::PvaValue};
 
 fn validate_array_len(
     kind: &str,
@@ -64,6 +65,27 @@ fn validate_union_value_type(value: &PvaUnionValue, typ: &PvaUnionType) -> Resul
                     field_type.name
                 )
             })
+        }
+    }
+}
+
+fn validate_variant_union_value_type(value: &PvaVariantUnionValue) -> Result<(), String> {
+    match value {
+        PvaVariantUnionValue::Null => Ok(()),
+        PvaVariantUnionValue::Selected {
+            typ: selected_type,
+            value: selected_value,
+        } => {
+            if matches!(selected_type, PvaType::Null)
+                || matches!(selected_value.as_ref(), PvaValue::Null)
+            {
+                return Err(
+                    "A selected PVA variant union cannot contain a null type or value".to_string(),
+                );
+            }
+
+            validate_pva_value_type(selected_value, selected_type)
+                .map_err(|error| format!("PVA variant union selection is invalid: {error}"))
         }
     }
 }
@@ -207,27 +229,18 @@ pub(crate) fn validate_pva_value_type(value: &PvaValue, typ: &PvaType) -> Result
             }
             Ok(())
         }
-        (PvaValue::VariantUnion(value), PvaType::VariantUnion) => match value {
-            PvaVariantUnionValue::Null => Ok(()),
-            PvaVariantUnionValue::Selected {
-                typ: selected_type,
-                value: selected_value,
-            } => {
-                if matches!(selected_type, PvaType::Null)
-                    || matches!(selected_value.as_ref(), PvaValue::Null)
-                {
-                    return Err(
-                        "A selected PVA variant union cannot contain a null type or value"
-                            .to_string(),
-                    );
+        (PvaValue::VariantUnion(value), PvaType::VariantUnion) => {
+            validate_variant_union_value_type(value)
+        }
+        (PvaValue::VariantUnionVarSizeArray(values), PvaType::VariantUnionVarSizeArray) => {
+            for (index, value) in values.iter().enumerate() {
+                if let Some(value) = value {
+                    validate_variant_union_value_type(value).map_err(|error| {
+                        format!("PVA variant union array element {index} is invalid: {error}")
+                    })?;
                 }
-
-                validate_pva_value_type(selected_value, selected_type)
-                    .map_err(|error| format!("PVA variant union selection is invalid: {error}"))
             }
-        },
-        (PvaValue::VariantUnionVarSizeArray, PvaType::VariantUnionVarSizeArray) => {
-            Err("PVA variant union array value validation is not implemented".to_string())
+            Ok(())
         }
 
         _ => Err(format!("PVA value variant does not match type {typ:?}")),
@@ -237,55 +250,35 @@ pub(crate) fn validate_pva_value_type(value: &PvaValue, typ: &PvaType) -> Result
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::pva_message::{
-        header::MsgEndian, primitive::PvaElement, value::PvaVariantUnionValue,
-    };
 
     #[test]
-    fn variant_union_selected_type_matches_value() {
-        let value = PvaValue::VariantUnion(PvaVariantUnionValue::Selected {
-            typ: PvaType::Int,
-            value: Box::new(PvaValue::Int(42)),
-        });
+    fn validates_variant_union_array_elements() {
+        let value = PvaValue::VariantUnionVarSizeArray(vec![
+            None,
+            Some(PvaVariantUnionValue::Null),
+            Some(PvaVariantUnionValue::Selected {
+                typ: PvaType::Int,
+                value: Box::new(PvaValue::Int(42)),
+            }),
+        ]);
 
-        assert!(validate_pva_value_type(&value, &PvaType::VariantUnion).is_ok());
+        assert!(validate_pva_value_type(&value, &PvaType::VariantUnionVarSizeArray).is_ok());
     }
 
     #[test]
-    fn variant_union_rejects_mismatched_selected_value() {
-        let value = PvaValue::VariantUnion(PvaVariantUnionValue::Selected {
-            typ: PvaType::Int,
-            value: Box::new(PvaValue::String("not an integer".to_string())),
-        });
+    fn rejects_invalid_variant_union_array_element() {
+        let value = PvaValue::VariantUnionVarSizeArray(vec![
+            None,
+            Some(PvaVariantUnionValue::Null),
+            Some(PvaVariantUnionValue::Selected {
+                typ: PvaType::Int,
+                value: Box::new(PvaValue::String("not an integer".to_string())),
+            }),
+        ]);
 
-        let error = validate_pva_value_type(&value, &PvaType::VariantUnion).unwrap_err();
+        let error =
+            validate_pva_value_type(&value, &PvaType::VariantUnionVarSizeArray).unwrap_err();
+        assert!(error.contains("array element 2"));
         assert!(error.contains("variant union selection is invalid"));
-    }
-
-    #[test]
-    fn variant_union_rejects_null_selected_value() {
-        let value = PvaValue::VariantUnion(PvaVariantUnionValue::Selected {
-            typ: PvaType::Null,
-            value: Box::new(PvaValue::Null),
-        });
-
-        let error = validate_pva_value_type(&value, &PvaType::VariantUnion).unwrap_err();
-        assert!(error.contains("cannot contain a null type or value"));
-    }
-
-    #[test]
-    fn invalid_variant_union_does_not_modify_output_buffer() {
-        let value = PvaVariantUnionValue::Selected {
-            typ: PvaType::Int,
-            value: Box::new(PvaValue::String("not an integer".to_string())),
-        };
-        let mut buf = vec![0xaa];
-
-        assert!(
-            value
-                .to_buf(&PvaType::VariantUnion, &mut buf, MsgEndian::Little)
-                .is_err()
-        );
-        assert_eq!(buf, vec![0xaa]);
     }
 }

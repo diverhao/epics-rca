@@ -1,5 +1,8 @@
+use std::ptr::read;
+
 use crate::{
     pva_message::{
+        complex::{PvaComplexType, PvaStructType, PvaUnionType},
         header::MsgEndian,
         primitive::{PvaElement, PvaSize},
         type_registry::PvaTypeRegistry,
@@ -228,21 +231,21 @@ impl PvaType {
 
             0x82 => PvaType::VariantUnion,
 
-            // todo: implement it
-            0x8A => {
-                return Err(format!(
-                    "Error: PVA variant union type code 0x{code:02X} is not implemented"
-                ));
-            }
+            0x8A => PvaType::VariantUnionVarSizeArray,
 
-            _ => return Err(format!("Error: Invalid PVA type code 0x{code:02X}")),
+            _ => return Err(format!("Not supported type code {code}")),
         };
 
         Ok(pva_type)
     }
 
     // actually append_to_buf()
-    pub fn to_buf(self: &Self, buf: &mut Vec<u8>, endian: MsgEndian) -> Result<(), String> {
+    pub fn to_buf(
+        self: &Self,
+        buf: &mut Vec<u8>,
+        endian: MsgEndian,
+        registry: &mut PvaTypeRegistry,
+    ) -> Result<(), String> {
         match self {
             Self::Null => buf.push(0xff),
             Self::Boolean => buf.push(0x00),
@@ -383,187 +386,33 @@ impl PvaType {
             }
 
             Self::Struct(typ) => {
-                typ.to_buf(buf, endian)?;
+                typ.to_buf(buf, endian, registry)?;
             }
             Self::StructVarSizeArray(typ) => {
                 // append 0x88
                 buf.push(0x88);
-                typ.to_buf(buf, endian)?;
+                typ.to_buf(buf, endian, registry)?;
             }
 
             Self::Union(typ) => {
-                typ.to_buf(buf, endian)?;
+                typ.to_buf(buf, endian, registry)?;
             }
             Self::UnionVarSizeArray(typ) => {
                 // append 0x89
                 buf.push(0x89);
-                typ.to_buf(buf, endian)?;
+                typ.to_buf(buf, endian, registry)?;
             }
 
             Self::VariantUnion => {
                 // append 0x82
-                buf.push(0x89);
+                buf.push(0x82);
             }
 
-            // todo: implement it
             Self::VariantUnionVarSizeArray => {
-                return Err("Variant Union type encoding has not been implemented".to_string());
+                // append 0x8A
+                buf.push(0x8A);
             }
         }
         Ok(())
-    }
-}
-
-// ---------------- struct type -------------
-
-#[derive(Debug, Clone)]
-pub struct PvaStructType {
-    pub id: String,                // e.g. timeStamp_t
-    pub fields: Vec<PvaFieldType>, // e.g. [{name: "secondsPastEpoch", typ: PvaType::Long}, {name: "nanoSeconds", typ: PvaType::Int}, ]
-}
-
-impl PvaStructType {
-    fn to_buf(self: &Self, buf: &mut Vec<u8>, endian: MsgEndian) -> Result<(), String> {
-        // code 0x80
-        buf.push(0x80);
-
-        // struct ID string
-        self.id.to_buf(&PvaType::String, buf, endian)?;
-
-        // number of fields
-        self.fields.len().to_buf(buf, endian)?;
-
-        // field types
-        for field_type in &self.fields {
-            field_type.to_buf(buf, endian)?;
-        }
-
-        Ok(())
-    }
-
-    fn from_buf(
-        buf: &[u8],
-        offset: &mut usize,
-        endian: MsgEndian,
-        registry: &mut PvaTypeRegistry,
-    ) -> Result<PvaStructType, String> {
-        // consume and verify 0x80
-        let code = u8::from_buf(&PvaType::UByte, buf, offset, endian)?;
-        if code != 0x80 {
-            return Err("Error decoding struct type, code is not 0x80".to_string());
-        }
-
-        // struct ID string, decode like variable size string
-        let id = String::from_buf(&PvaType::String, buf, offset, endian)?;
-
-        // number of fields, encoded as PvaSize
-        let num_fields = usize::from_buf(buf, offset, endian)?;
-
-        // fields type: field name + pva type
-        let mut fields: Vec<PvaFieldType> = vec![];
-        for _ in 0..num_fields {
-            let field_type = PvaFieldType::from_buf(buf, offset, endian, registry)?;
-            fields.push(field_type);
-        }
-
-        Ok(PvaStructType {
-            id: id,
-            fields: fields,
-        })
-    }
-}
-
-#[derive(Debug, Clone)]
-pub struct PvaFieldType {
-    pub name: String,
-    pub typ: PvaType,
-}
-
-impl PvaFieldType {
-    pub fn to_buf(self: &Self, buf: &mut Vec<u8>, endian: MsgEndian) -> Result<(), String> {
-        let name = &self.name;
-        name.to_buf(&PvaType::String, buf, endian)?;
-
-        let typ = &self.typ;
-        typ.to_buf(buf, endian)?;
-        Ok(())
-    }
-
-    pub fn from_buf(
-        buf: &[u8],
-        offset: &mut usize,
-        endian: MsgEndian,
-        registry: &mut PvaTypeRegistry,
-    ) -> Result<Self, String> {
-        // field name
-        let name = String::from_buf(&PvaType::String, buf, offset, endian)?;
-
-        // field type
-        let typ = PvaType::from_buf(buf, offset, endian, registry)?;
-
-        Ok(PvaFieldType {
-            name: name,
-            typ: typ,
-        })
-    }
-}
-
-// ---------------- union type -------------
-
-// exactly the same as PvaStructType except the to_buf
-#[derive(Debug, Clone)]
-pub struct PvaUnionType {
-    pub id: String,                // e.g. timeStamp_t
-    pub fields: Vec<PvaFieldType>, // e.g. [{name: "secondsPastEpoch", typ: PvaType::Long}, {name: "nanoSeconds", typ: PvaType::Int}, ]
-}
-
-impl PvaUnionType {
-    fn to_buf(self: &Self, buf: &mut Vec<u8>, endian: MsgEndian) -> Result<(), String> {
-        // code 0x81
-        buf.push(0x81);
-
-        // union ID string
-        self.id.to_buf(&PvaType::String, buf, endian)?;
-
-        // number of fields
-        self.fields.len().to_buf(buf, endian)?;
-
-        // field types
-        for field_type in &self.fields {
-            field_type.to_buf(buf, endian)?;
-        }
-
-        Ok(())
-    }
-
-    fn from_buf(
-        buf: &[u8],
-        offset: &mut usize,
-        endian: MsgEndian,
-        registry: &mut PvaTypeRegistry,
-    ) -> Result<PvaUnionType, String> {
-        // consume 0x81
-        let code = u8::from_buf(&PvaType::UByte, buf, offset, endian)?;
-        if code != 0x81 {
-            return Err("Error decoding union type, code is not 0x81".to_string());
-        }
-
-        // union ID string, decode like variable size string
-        let id = String::from_buf(&PvaType::String, buf, offset, endian)?;
-
-        // number of fields, encoded as PvaSize
-        let num_fields = usize::from_buf(buf, offset, endian)?;
-
-        // fields type: field name + pva type
-        let mut fields: Vec<PvaFieldType> = vec![];
-        for _ in 0..num_fields {
-            let field_type = PvaFieldType::from_buf(buf, offset, endian, registry)?;
-            fields.push(field_type);
-        }
-
-        Ok(PvaUnionType {
-            id: id,
-            fields: fields,
-        })
     }
 }

@@ -1,9 +1,15 @@
 use crate::pva_message::{
-    complex::{PvaStructValue, PvaUnionValue, PvaVariantUnionValue, array_from_buf, bound_array_from_buf, bounded_array_to_buf, fixed_array_to_buf, var_array_from_buf, var_size_array_to_buf}, header::MsgEndian, primitive::{PvaElement, PvaSize}, typ::{
-        PvaStructType,
-        PvaType::{self, Boolean},
-        PvaUnionType,
-    }, type_registry::PvaTypeRegistry, value_validation::validate_pva_value_type
+    complex::{PvaComplexValue, PvaStructValue, PvaUnionValue, PvaVariantUnionValue},
+    header::MsgEndian,
+    primitive::{PvaElement, PvaSize},
+    typ::PvaType::{self, Boolean},
+    type_registry::PvaTypeRegistry,
+    value_validation::validate_pva_value_type,
+};
+
+use crate::pva_message::primitive::{
+    array_from_buf, bound_array_from_buf, bounded_array_to_buf, fixed_array_to_buf,
+    var_array_from_buf, var_size_array_to_buf,
 };
 
 pub enum PvaValue {
@@ -77,10 +83,8 @@ pub enum PvaValue {
     UnionVarSizeArray(Vec<Option<PvaUnionValue>>), // 0x89, 0b 100 01 001
 
     VariantUnion(PvaVariantUnionValue), // 0x82, 0b 100 00 010
-    // todo: need to implement
-    VariantUnionVarSizeArray, // 0x8A, 0b 100 01 010
+    VariantUnionVarSizeArray(Vec<Option<PvaVariantUnionValue>>), // 0x8A, 0b 100 01 010
 }
-
 
 impl PvaValue {
     // actually append_to_buf()
@@ -90,6 +94,7 @@ impl PvaValue {
         typ: PvaType,
         buf: &mut Vec<u8>,
         endian: MsgEndian,
+        registry: &mut PvaTypeRegistry,
     ) -> Result<(), String> {
         validate_pva_value_type(self, &typ)?;
 
@@ -357,7 +362,7 @@ impl PvaValue {
                     PvaType::Struct(_) => {}
                     _ => return Err("PvaValue failed to encode: type not match".to_string()),
                 };
-                value.to_buf(&typ, buf, endian)
+                value.to_buf(&typ, buf, endian, registry)
             }
 
             PvaValue::StructVarSizeArray(values) => {
@@ -365,7 +370,7 @@ impl PvaValue {
                     PvaType::StructVarSizeArray(_) => {}
                     _ => return Err("PvaValue failed to encode: type not match".to_string()),
                 };
-                PvaStructValue::var_array_to_buf(&typ, values, buf, endian)
+                PvaStructValue::var_array_to_buf(&typ, values, buf, endian, registry)
             }
 
             PvaValue::Union(value) => {
@@ -373,7 +378,7 @@ impl PvaValue {
                     PvaType::Union(_) => {}
                     _ => return Err("PvaValue failed to encode: type not match".to_string()),
                 };
-                value.to_buf(&typ, buf, endian)
+                value.to_buf(&typ, buf, endian, registry)
             }
 
             PvaValue::UnionVarSizeArray(values) => {
@@ -381,7 +386,7 @@ impl PvaValue {
                     PvaType::UnionVarSizeArray(_) => {}
                     _ => return Err("PvaValue failed to encode: type not match".to_string()),
                 };
-                PvaUnionValue::var_array_to_buf(&typ, values, buf, endian)
+                PvaUnionValue::var_array_to_buf(&typ, values, buf, endian, registry)
             }
 
             PvaValue::VariantUnion(value) => {
@@ -389,12 +394,15 @@ impl PvaValue {
                     PvaType::VariantUnion => {}
                     _ => return Err("PvaValue failed to encode: type not match".to_string()),
                 };
-                value.to_buf(&typ, buf, endian)
+                value.to_buf(&typ, buf, endian, registry)
             }
 
-            // todo: implement it
-            PvaValue::VariantUnionVarSizeArray => {
-                return Err("Variant union value encoding not implemented".to_string());
+            PvaValue::VariantUnionVarSizeArray(values) => {
+                match typ {
+                    PvaType::VariantUnionVarSizeArray => {}
+                    _ => return Err("PvaValue failed to encode: type not match".to_string()),
+                };
+                PvaVariantUnionValue::var_array_to_buf(&typ, values, buf, endian, registry)
             }
         }?;
         Ok(())
@@ -405,6 +413,7 @@ impl PvaValue {
         buf: &[u8],
         offset: &mut usize,
         endian: MsgEndian,
+        registry: &mut PvaTypeRegistry,
     ) -> Result<Self, String> {
         let result = match typ {
             PvaType::Null => PvaValue::Null,
@@ -560,30 +569,29 @@ impl PvaValue {
                 PvaValue::StringFixArray(array_from_buf(*len, buf, offset, endian)?)
             }
 
-            PvaType::Struct(_) => {
-                PvaValue::Struct(PvaStructValue::from_buf(&typ, buf, offset, endian)?)
-            }
+            PvaType::Struct(_) => PvaValue::Struct(PvaStructValue::from_buf(
+                &typ, buf, offset, endian, registry,
+            )?),
 
             PvaType::StructVarSizeArray(_) => PvaValue::StructVarSizeArray(
-                PvaStructValue::var_array_from_buf(&typ, buf, offset, endian)?,
+                PvaStructValue::var_array_from_buf(&typ, buf, offset, endian, registry)?,
             ),
 
-            PvaType::Union(_) => {
-                PvaValue::Union(PvaUnionValue::from_buf(&typ, buf, offset, endian)?)
-            }
+            PvaType::Union(_) => PvaValue::Union(PvaUnionValue::from_buf(
+                &typ, buf, offset, endian, registry,
+            )?),
 
             PvaType::UnionVarSizeArray(_) => PvaValue::UnionVarSizeArray(
-                PvaUnionValue::var_array_from_buf(&typ, buf, offset, endian)?,
+                PvaUnionValue::var_array_from_buf(&typ, buf, offset, endian, registry)?,
             ),
 
-            PvaType::VariantUnion => {
-                PvaValue::VariantUnion(PvaVariantUnionValue::from_buf(&typ, buf, offset, endian)?)
-            }
+            PvaType::VariantUnion => PvaValue::VariantUnion(PvaVariantUnionValue::from_buf(
+                &typ, buf, offset, endian, registry,
+            )?),
 
-            // todo: implement it
-            PvaType::VariantUnionVarSizeArray => {
-                return Err("Variant union value decoder not implemented".to_string());
-            }
+            PvaType::VariantUnionVarSizeArray => PvaValue::VariantUnionVarSizeArray(
+                PvaVariantUnionValue::var_array_from_buf(&typ, buf, offset, endian, registry)?,
+            ),
         };
         Ok(result)
     }

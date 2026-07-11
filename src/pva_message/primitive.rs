@@ -158,40 +158,6 @@ impl PvaSize for usize {
     }
 }
 
-// /**
-//  * Only used for decoding Union value
-//  */
-// pub fn size_from_buf_with_null(
-//     buf: &[u8],
-//     offset: &mut usize,
-//     endian: MsgEndian,
-// ) -> Result<Option<usize>, String> {
-//     if let Some(value) = buf.get(*offset) {
-//         if *value == 0xff {
-//             *offset += 1;
-//             return Ok(None);
-//         }
-//     }
-//     let size = usize::from_buf(buf, offset, endian)?;
-//     return Ok(Some(size));
-// }
-
-// /**
-//  * Only used for encoding Union value
-//  */
-// pub fn size_to_buf_with_null(
-//     size: Option<usize>,
-//     buf: &mut Vec<u8>,
-//     endian: MsgEndian,
-// ) -> Result<(), String> {
-//     if let Some(size) = size {
-//         return size.to_buf(buf, endian);
-//     } else {
-//         buf.push(0xff);
-//         return Ok(());
-//     }
-// }
-
 impl PvaElement for bool {
     fn to_buf(&self, typ: &PvaType, buf: &mut Vec<u8>, _endian: MsgEndian) -> Result<(), String> {
         match typ {
@@ -650,4 +616,95 @@ impl PvaElement for String {
     fn default_typ() -> Option<PvaType> {
         Some(PvaType::String)
     }
+}
+
+// -------------- array helpers -----------------------
+
+pub fn var_size_array_to_buf<T: PvaElement>(
+    values: &[T],
+    buf: &mut Vec<u8>,
+    endian: MsgEndian,
+) -> Result<(), String> {
+    let element_typ =
+        T::default_typ().ok_or_else(|| "PVA array element type is not known".to_string())?;
+    values.len().to_buf(buf, endian)?;
+    for value in values {
+        value.to_buf(&element_typ, buf, endian)?;
+    }
+    Ok(())
+}
+
+pub fn bounded_array_to_buf<T: PvaElement>(
+    bound: usize,
+    values: &[T],
+    buf: &mut Vec<u8>,
+    endian: MsgEndian,
+) -> Result<(), String> {
+    if values.len() > bound {
+        return Err("Bounded array oversize".to_string());
+    }
+    let element_typ =
+        T::default_typ().ok_or_else(|| "PVA array element type is not known".to_string())?;
+    values.len().to_buf(buf, endian)?;
+    for value in values {
+        value.to_buf(&element_typ, buf, endian)?;
+    }
+    Ok(())
+}
+
+pub fn fixed_array_to_buf<T: PvaElement>(
+    size: usize,
+    values: &[T],
+    buf: &mut Vec<u8>,
+    endian: MsgEndian,
+) -> Result<(), String> {
+    if values.len() != size {
+        return Err("Fixed size array not match".to_string());
+    }
+    let element_typ =
+        T::default_typ().ok_or_else(|| "PVA array element type is not known".to_string())?;
+    for value in values {
+        value.to_buf(&element_typ, buf, endian)?;
+    }
+    Ok(())
+}
+
+pub fn array_from_buf<T: PvaElement>(
+    len: usize,
+    buf: &[u8],
+    offset: &mut usize,
+    endian: MsgEndian,
+) -> Result<Vec<T>, String> {
+    let element_typ =
+        T::default_typ().ok_or_else(|| "PVA array element type is not known".to_string())?;
+    let mut values = vec![];
+    for _ in 0..len {
+        values.push(T::from_buf(&element_typ, buf, offset, endian)?);
+    }
+    Ok(values)
+}
+
+pub fn var_array_from_buf<T: PvaElement>(
+    buf: &[u8],
+    offset: &mut usize,
+    endian: MsgEndian,
+) -> Result<Vec<T>, String> {
+    let len = usize::from_buf(buf, offset, endian)?;
+    array_from_buf(len, buf, offset, endian)
+}
+
+pub fn bound_array_from_buf<T: PvaElement>(
+    bound: usize,
+    element_type: &str,
+    buf: &[u8],
+    offset: &mut usize,
+    endian: MsgEndian,
+) -> Result<Vec<T>, String> {
+    let len = usize::from_buf(buf, offset, endian)?;
+    if len > bound {
+        return Err(format!(
+            "Error: PVA {element_type} bounded array length {len} exceeds bound {bound}"
+        ));
+    }
+    array_from_buf(len, buf, offset, endian)
 }

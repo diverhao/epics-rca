@@ -1,96 +1,145 @@
-use crate::pva_message::{header::MsgEndian, primitive::{PvaElement, PvaSize}, typ::{PvaStructType, PvaType, PvaUnionType}, type_registry::PvaTypeRegistry, value::PvaValue, value_validation::validate_pva_value_type};
+use crate::pva_message::{
+    header::MsgEndian,
+    primitive::{PvaElement, PvaSize},
+    typ::PvaType,
+    type_registry::PvaTypeRegistry,
+    value::PvaValue,
+    value_validation::validate_pva_value_type,
+};
 
+// ---------------- trait -------------------
 
-pub struct PvaStructValue {
-    pub(crate) fields: Vec<PvaValue>,
-}
-
-pub enum PvaUnionValue {
-    Null,
-    Selected { index: usize, field: Box<PvaValue> },
-}
-
-pub enum PvaVariantUnionValue {
-    Null,
-    Selected { typ: PvaType, value: Box<PvaValue> },
-}
-
-impl PvaElement for PvaVariantUnionValue {
+pub trait PvaComplexType {
+    // actually append_to_buf()
     fn to_buf(
-        self: &Self,
+        &self,
+        buf: &mut Vec<u8>,
+        endian: MsgEndian,
+        registry: &mut PvaTypeRegistry,
+    ) -> Result<(), String>;
+
+    fn from_buf(
+        buf: &[u8],
+        offset: &mut usize,
+        endian: MsgEndian,
+        registry: &mut PvaTypeRegistry,
+    ) -> Result<Self, String>
+    where
+        Self: Sized;
+
+    fn default_typ() -> Option<PvaType>
+    where
+        Self: Sized,
+    {
+        None
+    }
+}
+
+pub trait PvaComplexValue {
+    // actually append_to_buf()
+    fn to_buf(
+        &self,
         typ: &PvaType,
         buf: &mut Vec<u8>,
         endian: MsgEndian,
-    ) -> Result<(), String> {
-        match typ {
-            PvaType::VariantUnion => {}
-            _ => return Err("Must a variant union type".to_string()),
-        };
-
-        match self {
-            PvaVariantUnionValue::Null => {
-                buf.push(0xff);
-                return Ok(());
-            }
-            PvaVariantUnionValue::Selected { typ, value } => {
-                if matches!(typ, PvaType::Null) || matches!(value.as_ref(), PvaValue::Null) {
-                    return Err(
-                        "A selected PVA variant union cannot contain a null type or value"
-                            .to_string(),
-                    );
-                }
-                validate_pva_value_type(value, typ)?;
-
-                // encode the type, no caching
-                typ.to_buf(buf, endian)?;
-                // encode the value
-                value.to_buf(typ.clone(), buf, endian)?;
-                return Ok(());
-            }
-        }
-    }
+        registry: &mut PvaTypeRegistry,
+    ) -> Result<(), String>;
 
     fn from_buf(
         typ: &PvaType,
         buf: &[u8],
         offset: &mut usize,
         endian: MsgEndian,
-    ) -> Result<PvaVariantUnionValue, String> {
-        match typ {
-            PvaType::VariantUnion => {}
-            _ => return Err("Must a variant union type".to_string()),
-        };
+        registry: &mut PvaTypeRegistry,
+    ) -> Result<Self, String>
+    where
+        Self: Sized;
 
-        let first_byte = buf.get(*offset);
-        let first_byte = match first_byte {
-            Some(first_byte) => first_byte,
-            None => return Err("First byte error".to_string()),
-        };
-
-        if *first_byte == 0xff {
-            *offset = *offset + 1;
-            return Ok(PvaVariantUnionValue::Null);
-        } else {
-            // decode type
-            // use a dummy pva type registry
-            let registry = &mut PvaTypeRegistry::new();
-            let typ = PvaType::from_buf(buf, offset, endian, registry)?;
-            // decode value
-            let value = PvaValue::from_buf(&typ, buf, offset, endian)?;
-            return Ok(PvaVariantUnionValue::Selected {
-                typ,
-                value: Box::new(value),
-            });
-        }
+    fn default_typ() -> Option<PvaType>
+    where
+        Self: Sized,
+    {
+        None
     }
 }
 
-impl PvaElement for PvaStructValue {
+// ---------------- struct type -------------
+
+#[derive(Debug, Clone)]
+pub struct PvaStructType {
+    pub id: String,                // e.g. timeStamp_t
+    pub fields: Vec<PvaFieldType>, // e.g. [{name: "secondsPastEpoch", typ: PvaType::Long}, {name: "nanoSeconds", typ: PvaType::Int}, ]
+}
+
+impl PvaComplexType for PvaStructType {
+    fn to_buf(
+        self: &Self,
+        buf: &mut Vec<u8>,
+        endian: MsgEndian,
+        registry: &mut PvaTypeRegistry,
+    ) -> Result<(), String> {
+        // code 0x80
+        buf.push(0x80);
+
+        // struct ID string
+        self.id.to_buf(&PvaType::String, buf, endian)?;
+
+        // number of fields
+        self.fields.len().to_buf(buf, endian)?;
+
+        // field types
+        for field_type in &self.fields {
+            field_type.to_buf(buf, endian, registry)?;
+        }
+
+        Ok(())
+    }
+
+    fn from_buf(
+        buf: &[u8],
+        offset: &mut usize,
+        endian: MsgEndian,
+        registry: &mut PvaTypeRegistry,
+    ) -> Result<PvaStructType, String> {
+        // consume and verify 0x80
+        let code = u8::from_buf(&PvaType::UByte, buf, offset, endian)?;
+        if code != 0x80 {
+            return Err("Error decoding struct type, code is not 0x80".to_string());
+        }
+
+        // struct ID string, decode like variable size string
+        let id = String::from_buf(&PvaType::String, buf, offset, endian)?;
+
+        // number of fields, encoded as PvaSize
+        let num_fields = usize::from_buf(buf, offset, endian)?;
+
+        // fields type: field name + pva type
+        let mut fields: Vec<PvaFieldType> = vec![];
+        for _ in 0..num_fields {
+            let field_type = PvaFieldType::from_buf(buf, offset, endian, registry)?;
+            fields.push(field_type);
+        }
+
+        Ok(PvaStructType {
+            id: id,
+            fields: fields,
+        })
+    }
+}
+
+// ------------ struct value ----------------
+
+pub struct PvaStructValue {
+    pub(crate) fields: Vec<PvaValue>,
+}
+
+impl PvaComplexValue for PvaStructValue {
     fn to_buf(
         self: &Self,
         typ: &PvaType,
         buf: &mut Vec<u8>,
         endian: MsgEndian,
+        registry: &mut PvaTypeRegistry,
     ) -> Result<(), String> {
         let typ = match typ {
             PvaType::Struct(typ) => typ,
@@ -106,7 +155,7 @@ impl PvaElement for PvaStructValue {
         }
 
         for (field, field_type) in self.fields.iter().zip(&typ.fields) {
-            field.to_buf(field_type.typ.clone(), buf, endian)?;
+            field.to_buf(field_type.typ.clone(), buf, endian, registry)?;
         }
         Ok(())
     }
@@ -117,6 +166,7 @@ impl PvaElement for PvaStructValue {
         buf: &[u8],
         offset: &mut usize,
         endian: MsgEndian,
+        registry: &mut PvaTypeRegistry,
     ) -> Result<PvaStructValue, String> {
         let typ: &PvaStructType = match typ {
             PvaType::Struct(typ) => typ,
@@ -125,7 +175,7 @@ impl PvaElement for PvaStructValue {
 
         let mut fields: Vec<PvaValue> = vec![];
         for field in &typ.fields {
-            let value = PvaValue::from_buf(&field.typ, buf, offset, endian)?;
+            let value = PvaValue::from_buf(&field.typ, buf, offset, endian, registry)?;
             fields.push(value);
         }
         Ok(PvaStructValue { fields: fields })
@@ -138,6 +188,7 @@ impl PvaStructValue {
         buf: &[u8],
         offset: &mut usize,
         endian: MsgEndian,
+        registry: &mut PvaTypeRegistry,
     ) -> Result<Vec<Option<PvaStructValue>>, String> {
         let typ: &PvaStructType = match typ {
             PvaType::StructVarSizeArray(typ) => typ,
@@ -160,6 +211,7 @@ impl PvaStructValue {
                     buf,
                     offset,
                     endian,
+                    registry,
                 )?));
             } else {
                 // do nothing
@@ -174,6 +226,7 @@ impl PvaStructValue {
         values: &[Option<PvaStructValue>],
         buf: &mut Vec<u8>,
         endian: MsgEndian,
+        registry: &mut PvaTypeRegistry,
     ) -> Result<(), String> {
         let typ: &PvaStructType = match typ {
             PvaType::StructVarSizeArray(typ) => typ,
@@ -190,7 +243,7 @@ impl PvaStructValue {
                 Some(value) => {
                     let typ = typ.clone();
                     true.to_buf(&PvaType::Boolean, buf, endian)?;
-                    value.to_buf(&PvaType::Struct(typ), buf, endian)?;
+                    value.to_buf(&PvaType::Struct(typ), buf, endian, registry)?;
                 }
                 None => {
                     false.to_buf(&PvaType::Boolean, buf, endian)?;
@@ -201,12 +254,126 @@ impl PvaStructValue {
     }
 }
 
-impl PvaElement for PvaUnionValue {
+// ------------- struct/union field type --------------
+#[derive(Debug, Clone)]
+pub struct PvaFieldType {
+    pub name: String,
+    pub typ: PvaType,
+}
+
+impl PvaComplexType for PvaFieldType {
+    fn to_buf(
+        self: &Self,
+        buf: &mut Vec<u8>,
+        endian: MsgEndian,
+        registry: &mut PvaTypeRegistry,
+    ) -> Result<(), String> {
+        let name = &self.name;
+        name.to_buf(&PvaType::String, buf, endian)?;
+
+        let typ = &self.typ;
+        typ.to_buf(buf, endian, registry)?;
+        Ok(())
+    }
+
+    fn from_buf(
+        buf: &[u8],
+        offset: &mut usize,
+        endian: MsgEndian,
+        registry: &mut PvaTypeRegistry,
+    ) -> Result<Self, String> {
+        // field name
+        let name = String::from_buf(&PvaType::String, buf, offset, endian)?;
+
+        // field type
+        let typ = PvaType::from_buf(buf, offset, endian, registry)?;
+
+        Ok(PvaFieldType {
+            name: name,
+            typ: typ,
+        })
+    }
+}
+
+// ---------------- union type -------------
+
+// exactly the same as PvaStructType except the to_buf
+#[derive(Debug, Clone)]
+pub struct PvaUnionType {
+    pub id: String,                // e.g. timeStamp_t
+    pub fields: Vec<PvaFieldType>, // e.g. [{name: "secondsPastEpoch", typ: PvaType::Long}, {name: "nanoSeconds", typ: PvaType::Int}, ]
+}
+
+impl PvaComplexType for PvaUnionType {
+    fn to_buf(
+        self: &Self,
+        buf: &mut Vec<u8>,
+        endian: MsgEndian,
+        registry: &mut PvaTypeRegistry,
+    ) -> Result<(), String> {
+        // code 0x81
+        buf.push(0x81);
+
+        // union ID string
+        self.id.to_buf(&PvaType::String, buf, endian)?;
+
+        // number of fields
+        self.fields.len().to_buf(buf, endian)?;
+
+        // field types
+        for field_type in &self.fields {
+            field_type.to_buf(buf, endian, registry)?;
+        }
+
+        Ok(())
+    }
+
+    fn from_buf(
+        buf: &[u8],
+        offset: &mut usize,
+        endian: MsgEndian,
+        registry: &mut PvaTypeRegistry,
+    ) -> Result<PvaUnionType, String> {
+        // consume 0x81
+        let code = u8::from_buf(&PvaType::UByte, buf, offset, endian)?;
+        if code != 0x81 {
+            return Err("Error decoding union type, code is not 0x81".to_string());
+        }
+
+        // union ID string, decode like variable size string
+        let id = String::from_buf(&PvaType::String, buf, offset, endian)?;
+
+        // number of fields, encoded as PvaSize
+        let num_fields = usize::from_buf(buf, offset, endian)?;
+
+        // fields type: field name + pva type
+        let mut fields: Vec<PvaFieldType> = vec![];
+        for _ in 0..num_fields {
+            let field_type = PvaFieldType::from_buf(buf, offset, endian, registry)?;
+            fields.push(field_type);
+        }
+
+        Ok(PvaUnionType {
+            id: id,
+            fields: fields,
+        })
+    }
+}
+
+// ------------ union value ----------------
+
+pub enum PvaUnionValue {
+    Null,
+    Selected { index: usize, field: Box<PvaValue> },
+}
+
+impl PvaComplexValue for PvaUnionValue {
     fn to_buf(
         self: &Self,
         typ: &PvaType,
         buf: &mut Vec<u8>,
         endian: MsgEndian,
+        registry: &mut PvaTypeRegistry,
     ) -> Result<(), String> {
         let typ = match typ {
             PvaType::Union(typ) => typ,
@@ -224,7 +391,7 @@ impl PvaElement for PvaUnionValue {
                     .get(*index)
                     .ok_or_else(|| format!("Error: PVA union choice {} is out of range", index))?;
                 index.to_buf(buf, endian)?;
-                return field.to_buf(field_type.typ.clone(), buf, endian);
+                return field.to_buf(field_type.typ.clone(), buf, endian, registry);
             }
         }
     }
@@ -235,7 +402,10 @@ impl PvaElement for PvaUnionValue {
         buf: &[u8],
         offset: &mut usize,
         endian: MsgEndian,
+        registry: &mut PvaTypeRegistry,
     ) -> Result<PvaUnionValue, String> {
+        // 0x81 is already consumed
+
         let typ: &PvaUnionType = match typ {
             PvaType::Union(typ) => typ,
             _ => return Err("PVA union value decoding requires PvaType::Union".to_string()),
@@ -255,7 +425,7 @@ impl PvaElement for PvaUnionValue {
                         format!("Error: PVA union choice {index} is out of range")
                     })?;
 
-                    let field = PvaValue::from_buf(&field_type.typ, buf, offset, endian)?;
+                    let field = PvaValue::from_buf(&field_type.typ, buf, offset, endian, registry)?;
 
                     return Ok(PvaUnionValue::Selected {
                         index: index,
@@ -267,12 +437,14 @@ impl PvaElement for PvaUnionValue {
         };
     }
 }
+
 impl PvaUnionValue {
     pub fn var_array_from_buf(
         typ: &PvaType,
         buf: &[u8],
         offset: &mut usize,
         endian: MsgEndian,
+        registry: &mut PvaTypeRegistry,
     ) -> Result<Vec<Option<PvaUnionValue>>, String> {
         let typ = match typ {
             PvaType::UnionVarSizeArray(typ) => typ,
@@ -295,6 +467,7 @@ impl PvaUnionValue {
                     buf,
                     offset,
                     endian,
+                    registry,
                 )?));
             } else {
                 arr.push(None);
@@ -308,6 +481,7 @@ impl PvaUnionValue {
         values: &[Option<PvaUnionValue>],
         buf: &mut Vec<u8>,
         endian: MsgEndian,
+        registry: &mut PvaTypeRegistry,
     ) -> Result<(), String> {
         let typ = match typ {
             PvaType::UnionVarSizeArray(typ) => typ,
@@ -325,7 +499,7 @@ impl PvaUnionValue {
                     let typ = typ.clone();
                     // write 1 to indicate this element exists
                     true.to_buf(&PvaType::Boolean, buf, endian)?;
-                    value.to_buf(&PvaType::Union(typ), buf, endian)?;
+                    value.to_buf(&PvaType::Union(typ), buf, endian, registry)?;
                 }
                 None => {
                     false.to_buf(&PvaType::Boolean, buf, endian)?;
@@ -336,91 +510,156 @@ impl PvaUnionValue {
     }
 }
 
-pub fn var_size_array_to_buf<T: PvaElement>(
-    values: &[T],
-    buf: &mut Vec<u8>,
-    endian: MsgEndian,
-) -> Result<(), String> {
-    let element_typ =
-        T::default_typ().ok_or_else(|| "PVA array element type is not known".to_string())?;
-    values.len().to_buf(buf, endian)?;
-    for value in values {
-        value.to_buf(&element_typ, buf, endian)?;
-    }
-    Ok(())
+// ------------ variant union value ----------------
+
+pub enum PvaVariantUnionValue {
+    Null,
+    Selected { typ: PvaType, value: Box<PvaValue> },
 }
 
-pub fn bounded_array_to_buf<T: PvaElement>(
-    bound: usize,
-    values: &[T],
-    buf: &mut Vec<u8>,
-    endian: MsgEndian,
-) -> Result<(), String> {
-    if values.len() > bound {
-        return Err("Bounded array oversize".to_string());
+impl PvaComplexValue for PvaVariantUnionValue {
+    fn to_buf(
+        self: &Self,
+        typ: &PvaType,
+        buf: &mut Vec<u8>,
+        endian: MsgEndian,
+        registry: &mut PvaTypeRegistry,
+    ) -> Result<(), String> {
+        match typ {
+            PvaType::VariantUnion => {}
+            _ => return Err("Must a variant union type".to_string()),
+        };
+
+        match self {
+            PvaVariantUnionValue::Null => {
+                buf.push(0xff);
+                return Ok(());
+            }
+            PvaVariantUnionValue::Selected { typ, value } => {
+                if matches!(typ, PvaType::Null) || matches!(value.as_ref(), PvaValue::Null) {
+                    return Err(
+                        "A selected PVA variant union cannot contain a null type or value"
+                            .to_string(),
+                    );
+                }
+                validate_pva_value_type(value, typ)?;
+
+                // encode the type, no caching
+                typ.to_buf(buf, endian, registry)?;
+                // encode the value
+                value.to_buf(typ.clone(), buf, endian, registry)?;
+                return Ok(());
+            }
+        }
     }
-    let element_typ =
-        T::default_typ().ok_or_else(|| "PVA array element type is not known".to_string())?;
-    values.len().to_buf(buf, endian)?;
-    for value in values {
-        value.to_buf(&element_typ, buf, endian)?;
+
+    fn from_buf(
+        typ: &PvaType,
+        buf: &[u8],
+        offset: &mut usize,
+        endian: MsgEndian,
+        registry: &mut PvaTypeRegistry,
+    ) -> Result<PvaVariantUnionValue, String> {
+        // 0x82 is already consumed
+
+        // check input type
+        match typ {
+            PvaType::VariantUnion => {}
+            _ => return Err("Must a variant union type".to_string()),
+        };
+
+        let first_byte = buf.get(*offset);
+        let first_byte = match first_byte {
+            Some(first_byte) => first_byte,
+            None => return Err("First byte error".to_string()),
+        };
+
+        if *first_byte == 0xff {
+            // Null variant
+            *offset = *offset + 1;
+            return Ok(PvaVariantUnionValue::Null);
+        } else {
+            // decode type
+            let typ = PvaType::from_buf(buf, offset, endian, registry)?;
+            // decode value
+            let value = PvaValue::from_buf(&typ, buf, offset, endian, registry)?;
+            return Ok(PvaVariantUnionValue::Selected {
+                typ,
+                value: Box::new(value),
+            });
+        }
     }
-    Ok(())
 }
 
-pub fn fixed_array_to_buf<T: PvaElement>(
-    size: usize,
-    values: &[T],
-    buf: &mut Vec<u8>,
-    endian: MsgEndian,
-) -> Result<(), String> {
-    if values.len() != size {
-        return Err("Fixed size array not match".to_string());
-    }
-    let element_typ =
-        T::default_typ().ok_or_else(|| "PVA array element type is not known".to_string())?;
-    for value in values {
-        value.to_buf(&element_typ, buf, endian)?;
-    }
-    Ok(())
-}
+impl PvaVariantUnionValue {
+    pub fn var_array_from_buf(
+        typ: &PvaType,
+        buf: &[u8],
+        offset: &mut usize,
+        endian: MsgEndian,
+        registry: &mut PvaTypeRegistry,
+    ) -> Result<Vec<Option<PvaVariantUnionValue>>, String> {
+        match typ {
+            PvaType::VariantUnionVarSizeArray => {}
+            _ => {
+                return Err(
+                    "PVA variant union array decoding requires PvaType::VariantUnionVarSizeArray"
+                        .to_string(),
+                );
+            }
+        };
 
-pub fn array_from_buf<T: PvaElement>(
-    len: usize,
-    buf: &[u8],
-    offset: &mut usize,
-    endian: MsgEndian,
-) -> Result<Vec<T>, String> {
-    let element_typ =
-        T::default_typ().ok_or_else(|| "PVA array element type is not known".to_string())?;
-    let mut values = vec![];
-    for _ in 0..len {
-        values.push(T::from_buf(&element_typ, buf, offset, endian)?);
+        let size = usize::from_buf(buf, offset, endian)?;
+        let mut arr: Vec<Option<PvaVariantUnionValue>> = vec![];
+        for ii in 0..size {
+            // read existance byte
+            let exist = bool::from_buf(&PvaType::Boolean, buf, offset, endian)?;
+            if exist {
+                arr.push(Some(PvaVariantUnionValue::from_buf(
+                    &PvaType::VariantUnion,
+                    buf,
+                    offset,
+                    endian,
+                    registry,
+                )?));
+            } else {
+                // element does not exist
+                arr.push(None);
+            }
+        }
+        Ok(arr)
     }
-    Ok(values)
-}
 
-pub fn var_array_from_buf<T: PvaElement>(
-    buf: &[u8],
-    offset: &mut usize,
-    endian: MsgEndian,
-) -> Result<Vec<T>, String> {
-    let len = usize::from_buf(buf, offset, endian)?;
-    array_from_buf(len, buf, offset, endian)
-}
+    pub fn var_array_to_buf(
+        typ: &PvaType,
+        values: &[Option<PvaVariantUnionValue>],
+        buf: &mut Vec<u8>,
+        endian: MsgEndian,
+        registry: &mut PvaTypeRegistry,
+    ) -> Result<(), String> {
+        match typ {
+            PvaType::VariantUnionVarSizeArray => {}
+            _ => {
+                return Err(
+                    "PVA variant union array encoding requires PvaType::VariantUnionVarSizeArray"
+                        .to_string(),
+                );
+            }
+        };
 
-pub fn bound_array_from_buf<T: PvaElement>(
-    bound: usize,
-    element_type: &str,
-    buf: &[u8],
-    offset: &mut usize,
-    endian: MsgEndian,
-) -> Result<Vec<T>, String> {
-    let len = usize::from_buf(buf, offset, endian)?;
-    if len > bound {
-        return Err(format!(
-            "Error: PVA {element_type} bounded array length {len} exceeds bound {bound}"
-        ));
+        values.len().to_buf(buf, endian)?;
+        for value in values {
+            match value {
+                Some(value) => {
+                    let typ = typ.clone();
+                    true.to_buf(&PvaType::Boolean, buf, endian)?;
+                    value.to_buf(&PvaType::VariantUnion, buf, endian, registry)?;
+                }
+                None => {
+                    false.to_buf(&PvaType::Boolean, buf, endian)?;
+                }
+            }
+        }
+        Ok(())
     }
-    array_from_buf(len, buf, offset, endian)
 }
