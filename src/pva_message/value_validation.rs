@@ -76,7 +76,7 @@ fn validate_variant_union_value_type(value: &PvaVariantUnionValue) -> Result<(),
             typ: selected_type,
             value: selected_value,
         } => {
-            if matches!(selected_type, PvaType::Null)
+            if matches!(selected_type.as_ref(), PvaType::Null)
                 || matches!(selected_value.as_ref(), PvaValue::Null)
             {
                 return Err(
@@ -249,7 +249,9 @@ pub(crate) fn validate_pva_value_type(value: &PvaValue, typ: &PvaType) -> Result
 
 #[cfg(test)]
 mod tests {
-    use super::*;
+    use std::sync::Arc;
+
+use super::*;
 
     #[test]
     fn validates_variant_union_array_elements() {
@@ -257,7 +259,7 @@ mod tests {
             None,
             Some(PvaVariantUnionValue::Null),
             Some(PvaVariantUnionValue::Selected {
-                typ: PvaType::Int,
+                typ: Arc::new(PvaType::Int),
                 value: Box::new(PvaValue::Int(42)),
             }),
         ]);
@@ -271,7 +273,7 @@ mod tests {
             None,
             Some(PvaVariantUnionValue::Null),
             Some(PvaVariantUnionValue::Selected {
-                typ: PvaType::Int,
+                typ: Arc::new(PvaType::Int),
                 value: Box::new(PvaValue::String("not an integer".to_string())),
             }),
         ]);

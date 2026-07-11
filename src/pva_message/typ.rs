@@ -1,4 +1,5 @@
 use std::ptr::read;
+use std::sync::Arc;
 
 use crate::{
     pva_message::{
@@ -83,11 +84,11 @@ pub enum PvaType {
     StringBoundArray(usize), // 0x70, 0b 011 10 000
     StringFixArray(usize),   // 0x78, 0b 011 11 000
 
-    Struct(PvaStructType),             // 0x80, 0b 100 00 000
-    StructVarSizeArray(PvaStructType), // 0x88, 0b 100 01 000
+    Struct(Arc<PvaStructType>),             // 0x80, 0b 100 00 000
+    StructVarSizeArray(Arc<PvaStructType>), // 0x88, 0b 100 01 000
 
-    Union(PvaUnionType),             // 0x81, 0b 100 00 001
-    UnionVarSizeArray(PvaUnionType), // 0x89, 0b 100 01 001
+    Union(Arc<PvaUnionType>),             // 0x81, 0b 100 00 001
+    UnionVarSizeArray(Arc<PvaUnionType>), // 0x89, 0b 100 01 001
 
     VariantUnion,             // 0x82, 0b 100 00 010
     VariantUnionVarSizeArray, // 0x8A, 0b 100 01 010
@@ -100,7 +101,7 @@ impl PvaType {
         offset: &mut usize,
         endian: MsgEndian,
         registry: &mut PvaTypeRegistry,
-    ) -> Result<Self, String> {
+    ) -> Result<Arc<Self>, String> {
         let code = u8::from_buf(&PvaType::UByte, buf, offset, endian)?;
 
         let pva_type = match code {
@@ -176,14 +177,14 @@ impl PvaType {
                     Some(typ) => typ,
                     None => return Err(format!("Cannot find type with ID {id} in registry")),
                 };
-                return Ok(typ.clone());
+                return Ok(Arc::clone(&typ));
             }
             0xfd => {
                 // 0xfd + type ID + type
                 let id = i16::from_buf(&PvaType::Short, buf, offset, endian)?;
                 let typ = PvaType::from_buf(buf, offset, endian, registry)?;
                 // register ID
-                registry.add(id, typ.clone());
+                registry.add(id, Arc::clone(&typ));
                 return Ok(typ);
             }
 
@@ -199,7 +200,7 @@ impl PvaType {
 
             0x88 => {
                 let pva_type = PvaType::from_buf(buf, offset, endian, registry)?;
-                let struct_type = match pva_type {
+                let struct_type = match pva_type.as_ref() {
                     PvaType::Struct(struct_type) => struct_type,
                     other => {
                         return Err(format!(
@@ -207,7 +208,7 @@ impl PvaType {
                         ));
                     }
                 };
-                return Ok(PvaType::StructVarSizeArray(struct_type));
+                return Ok(Arc::new(PvaType::StructVarSizeArray(struct_type.clone())));
             }
 
             0x81 => {
@@ -218,7 +219,7 @@ impl PvaType {
 
             0x89 => {
                 let pva_type = PvaType::from_buf(buf, offset, endian, registry)?;
-                let union_type = match pva_type {
+                let union_type = match pva_type.as_ref() {
                     PvaType::Union(union_type) => union_type,
                     other => {
                         return Err(format!(
@@ -226,7 +227,7 @@ impl PvaType {
                         ));
                     }
                 };
-                return Ok(PvaType::UnionVarSizeArray(union_type));
+                return Ok(Arc::new(PvaType::UnionVarSizeArray(union_type.clone())));
             }
 
             0x82 => PvaType::VariantUnion,
@@ -236,7 +237,7 @@ impl PvaType {
             _ => return Err(format!("Not supported type code {code}")),
         };
 
-        Ok(pva_type)
+        Ok(Arc::new(pva_type))
     }
 
     // actually append_to_buf()

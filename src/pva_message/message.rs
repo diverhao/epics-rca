@@ -3,6 +3,8 @@ use crate::pva_message::{
     header::{MsgEndian, MsgSeg, MsgSrc, PVA_HEADER_SIZE, PvaHeader, PvaHeaderData},
 };
 
+const MAX_PVA_PAYLOAD_SIZE: usize = i32::MAX as usize;
+
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct PvaMessage {
     header: PvaHeader,
@@ -17,11 +19,11 @@ impl PvaMessage {
         cmd: AppCmd,
         payload: Vec<u8>,
     ) -> Result<Self, String> {
-        let payload_size = u32::try_from(payload.len())
-            .map_err(|_| String::from("Error: PVA payload is larger than u32::MAX"))?;
+        let payload_size = i32::try_from(payload.len())
+            .map_err(|_| String::from("Error: PVA payload is larger than i32::MAX"))?;
 
         Ok(Self {
-            header: PvaHeader::new_application(seg_type, src, endian, cmd, payload_size),
+            header: PvaHeader::new_application(seg_type, src, endian, cmd, payload_size)?,
             payload,
         })
     }
@@ -241,9 +243,9 @@ impl PvaMessageReassembler {
                 self.max_payload_size
             ));
         }
-        if total > u32::MAX as usize {
+        if total > MAX_PVA_PAYLOAD_SIZE {
             return Err(String::from(
-                "Error: Reassembled PVA payload is larger than u32::MAX",
+                "Error: Reassembled PVA payload is larger than i32::MAX",
             ));
         }
         Ok(())
@@ -253,6 +255,7 @@ impl PvaMessageReassembler {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::pva_message::header::{MsgFlags, MsgType};
 
     #[test]
     fn frames_application_and_control_messages() {
@@ -296,6 +299,41 @@ mod tests {
         let mut offset = 0;
         assert!(PvaMessage::from_buf(&buf, &mut offset).is_err());
         assert_eq!(offset, 0);
+    }
+
+    #[test]
+    fn rejects_negative_application_payload_size() {
+        let buf = [
+            0xca,
+            0x02,
+            MsgFlags {
+                msg_type: MsgType::Application,
+                seg_type: MsgSeg::NotSeg,
+                src: MsgSrc::Server,
+                endian: MsgEndian::Little,
+            }
+            .to_u8(),
+            AppCmd::Echo.to_u8(),
+            0xff,
+            0xff,
+            0xff,
+            0xff,
+        ];
+
+        let mut offset = 0;
+        let error = PvaMessage::from_buf(&buf, &mut offset).unwrap_err();
+        assert!(error.contains("payload size cannot be negative"));
+        assert_eq!(offset, 0);
+
+        let error = PvaHeader::new_application(
+            MsgSeg::NotSeg,
+            MsgSrc::Server,
+            MsgEndian::Little,
+            AppCmd::Echo,
+            -1,
+        )
+        .unwrap_err();
+        assert!(error.contains("payload size cannot be negative"));
     }
 
     #[test]
@@ -361,5 +399,8 @@ mod tests {
         let mut reassembler = PvaMessageReassembler::new(2);
         assert!(reassembler.push(middle).is_err());
         assert!(reassembler.push(first).is_err());
+
+        let reassembler = PvaMessageReassembler::new(usize::MAX);
+        assert!(reassembler.ensure_size(MAX_PVA_PAYLOAD_SIZE, 1).is_err());
     }
 }

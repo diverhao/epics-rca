@@ -1,9 +1,9 @@
 use std::collections::HashMap;
-
+use std::sync::Arc;
 use crate::pva_message::typ::PvaType;
 
 pub struct PvaTypeRegistry {
-    pub types: HashMap<i16, PvaType>,
+    pub types: HashMap<i16, Arc<PvaType>>,
 }
 
 impl PvaTypeRegistry {
@@ -13,7 +13,7 @@ impl PvaTypeRegistry {
         }
     }
 
-    pub fn add(self: &mut Self, id: i16, typ: PvaType) {
+    pub fn add(self: &mut Self, id: i16, typ: Arc<PvaType>) {
         self.types_mut().insert(id, typ);
     }
 
@@ -21,15 +21,15 @@ impl PvaTypeRegistry {
         self.types_mut().remove(&id);
     }
 
-    pub fn types_mut(self: &mut Self) -> &mut HashMap<i16, PvaType> {
+    pub fn types_mut(self: &mut Self) -> &mut HashMap<i16, Arc<PvaType>> {
         &mut self.types
     }
 
-    pub fn types(self: &Self) -> &HashMap<i16, PvaType> {
+    pub fn types(self: &Self) -> &HashMap<i16, Arc<PvaType>> {
         &self.types
     }
 
-    pub fn typ(self: &Self, id: i16) -> Option<&PvaType> {
-        self.types().get(&id)
+    pub fn typ(self: &Self, id: i16) -> Option<Arc<PvaType>> {
+        self.types().get(&id).cloned()
     }
 }

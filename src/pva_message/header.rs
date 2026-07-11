@@ -114,7 +114,7 @@ impl MsgFlags {
 
 #[derive(Copy, Clone, Debug, Eq, PartialEq)]
 pub enum PvaHeaderData {
-    ApplicationPayloadSize(u32),
+    ApplicationPayloadSize(i32),
     ControlData(i32),
 }
 
@@ -133,9 +133,9 @@ impl PvaHeader {
         src: MsgSrc,
         endian: MsgEndian,
         cmd: AppCmd,
-        payload_size: u32,
-    ) -> PvaHeader {
-        PvaHeader {
+        payload_size: i32,
+    ) -> Result<PvaHeader, String> {
+        let header = PvaHeader {
             magic: PVA_MAGIC,
             version: PVA_VERSION,
             flags: MsgFlags {
@@ -146,7 +146,9 @@ impl PvaHeader {
             },
             cmd: PvaCmd::App(cmd),
             data: PvaHeaderData::ApplicationPayloadSize(payload_size),
-        }
+        };
+        header.validate()?;
+        Ok(header)
     }
 
     pub fn new_control(src: MsgSrc, endian: MsgEndian, cmd: CtrlCmd, data: i32) -> PvaHeader {
@@ -184,7 +186,7 @@ impl PvaHeader {
         self.data
     }
 
-    pub fn payload_size(&self) -> Option<u32> {
+    pub fn payload_size(&self) -> Option<i32> {
         match self.data {
             PvaHeaderData::ApplicationPayloadSize(size) => Some(size),
             PvaHeaderData::ControlData(_) => None,
@@ -214,7 +216,13 @@ impl PvaHeader {
         }
 
         match (self.flags.msg_type, self.cmd, self.data) {
-            (MsgType::Application, PvaCmd::App(_), PvaHeaderData::ApplicationPayloadSize(_)) => {}
+            (MsgType::Application, PvaCmd::App(_), PvaHeaderData::ApplicationPayloadSize(size)) => {
+                if size < 0 {
+                    return Err(format!(
+                        "Error: PVA application payload size cannot be negative: {size}"
+                    ));
+                }
+            }
             (MsgType::Control, PvaCmd::Ctrl(_), PvaHeaderData::ControlData(_)) => {
                 if self.flags.seg_type != MsgSeg::NotSeg {
                     return Err(String::from(
@@ -289,12 +297,12 @@ impl PvaHeader {
 
         let data = match (flags.msg_type, flags.endian) {
             (MsgType::Application, MsgEndian::Little) => {
-                PvaHeaderData::ApplicationPayloadSize(u32::from_le_bytes([
+                PvaHeaderData::ApplicationPayloadSize(i32::from_le_bytes([
                     buf[4], buf[5], buf[6], buf[7],
                 ]))
             }
             (MsgType::Application, MsgEndian::Big) => {
-                PvaHeaderData::ApplicationPayloadSize(u32::from_be_bytes([
+                PvaHeaderData::ApplicationPayloadSize(i32::from_be_bytes([
                     buf[4], buf[5], buf[6], buf[7],
                 ]))
             }
