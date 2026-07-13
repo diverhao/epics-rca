@@ -38,7 +38,7 @@ pub trait PvaSize {
 }
 
 // N is compile-time constant
-fn read_n_bytes<const N: usize>(
+pub fn read_n_bytes<const N: usize>(
     buf: &[u8],
     offset: &mut usize,
     element_type: &str,

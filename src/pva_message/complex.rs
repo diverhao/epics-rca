@@ -263,51 +263,6 @@ impl PvaStructValue {
 
 // ------------- struct/union field type --------------
 
-/**
- * Verify if a field name is legitimate
- */
-pub fn validate_pva_field_name(name: &str) -> Result<(), String> {
-    let mut chars = name.chars();
-    let first = chars
-        .next()
-        .ok_or_else(|| "PVA field name must not be empty".to_string())?;
-
-    if !first.is_ascii_alphabetic() && first != '_' {
-        return Err(format!(
-            "PVA field name \"{name}\" must begin with an ASCII letter or '_'"
-        ));
-    }
-
-    if let Some(invalid) =
-        chars.find(|character| !character.is_ascii_alphanumeric() && *character != '_')
-    {
-        return Err(format!(
-            "PVA field name \"{name}\" contains invalid character '{invalid}'; only ASCII letters, digits, and '_' are allowed"
-        ));
-    }
-
-    Ok(())
-}
-
-/**
- * Verify if there is duplicated field names in struct and union fields
- */
-pub fn validate_pva_fields(fields: &[Arc<PvaFieldType>]) -> Result<(), String> {
-    let mut names = HashSet::with_capacity(fields.len());
-
-    for field in fields {
-        validate_pva_field_name(&field.name)?;
-        if !names.insert(field.name.as_str()) {
-            return Err(format!(
-                "PVA type contains duplicate field name \"{}\"",
-                field.name
-            ));
-        }
-    }
-
-    Ok(())
-}
-
 #[derive(Debug, Clone)]
 pub struct PvaFieldType {
     pub name: String,
@@ -357,6 +312,51 @@ impl PvaComplexType for PvaFieldType {
             typ: typ,
         }))
     }
+}
+
+/**
+ * Verify if a field name is legitimate
+ */
+pub fn validate_pva_field_name(name: &str) -> Result<(), String> {
+    let mut chars = name.chars();
+    let first = chars
+        .next()
+        .ok_or_else(|| "PVA field name must not be empty".to_string())?;
+
+    if !first.is_ascii_alphabetic() && first != '_' {
+        return Err(format!(
+            "PVA field name \"{name}\" must begin with an ASCII letter or '_'"
+        ));
+    }
+
+    if let Some(invalid) =
+        chars.find(|character| !character.is_ascii_alphanumeric() && *character != '_')
+    {
+        return Err(format!(
+            "PVA field name \"{name}\" contains invalid character '{invalid}'; only ASCII letters, digits, and '_' are allowed"
+        ));
+    }
+
+    Ok(())
+}
+
+/**
+ * Verify if there is duplicated field names in struct and union fields
+ */
+pub fn validate_pva_fields(fields: &[Arc<PvaFieldType>]) -> Result<(), String> {
+    let mut names = HashSet::with_capacity(fields.len());
+
+    for field in fields {
+        validate_pva_field_name(&field.name)?;
+        if !names.insert(field.name.as_str()) {
+            return Err(format!(
+                "PVA type contains duplicate field name \"{}\"",
+                field.name
+            ));
+        }
+    }
+
+    Ok(())
 }
 
 // ---------------- union type -------------
