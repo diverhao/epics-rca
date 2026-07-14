@@ -123,7 +123,7 @@ impl TCP {
         // make copy so that cids is not held across await
         let cids: Vec<u32> = self.cids().iter().copied().collect();
         for cid in cids {
-            let channel = get_context().channels().channel_by_cid(cid);
+            let channel = get_context().ca_channels().channel_by_cid(cid);
             match channel {
                 Some(channel) => {
                     // a lightweight await, will not block too long

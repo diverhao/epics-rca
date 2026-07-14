@@ -1,4 +1,4 @@
-use crate::ca_channel::channel::Channel;
+use crate::ca_channel::ca_channel::CaChannel;
 use crate::ca_channel::dbr_data::{
     CtrlData, CtrlEnumData, CtrlPrecisionData, DbrData, GrData, GrEnumData, GrPrecisionData,
     PlainData, StsAckStringData, StsData, TimeData,
@@ -1069,7 +1069,7 @@ impl DbrData {
     }
 }
 
-impl Channel {
+impl CaChannel {
     // ----------------- dbr type conversion -------
     pub fn data_type_native_as_time(self: &Self) -> DbrType {
         match self.data_type_native() {

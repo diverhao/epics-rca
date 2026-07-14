@@ -1,4 +1,4 @@
-use crate::ca_channel::channel::Channel;
+use crate::ca_channel::ca_channel::CaChannel;
 use crate::ca_channel::dbr::{ChannelSeverity, ChannelStatus, DbrType, DbrValue};
 use std::{fmt, sync::Arc};
 

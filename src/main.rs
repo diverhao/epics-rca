@@ -10,13 +10,13 @@ mod tcp;
 mod udp;
 mod pva_channel;
 
-use crate::ca_channel::channel::Channel;
+use crate::ca_channel::ca_channel::CaChannel;
 use crate::ca_channel::dbr::ChannelState;
 use crate::ca_channel::dbr::DbrType;
 use crate::ca_channel::dbr::DbrValue;
 use crate::ca_channel::dbr_data::DbrData;
-use crate::ca_channel::monitor::MonitorDataType;
-use crate::ca_channel::monitor::MonitorState;
+use crate::ca_channel::ca_monitor::MonitorDataType;
+use crate::ca_channel::ca_monitor::MonitorState;
 use crate::context::context::create_context;
 use crate::context::context::get_context;
 use ::log::LevelFilter;
@@ -60,7 +60,7 @@ async fn main() {
     //         let mut tcp_connected_count = 0;
     //         let mut created_count = 0;
     //         let mut waiting_on_tcp_channels = 0;
-    //         for channel in get_context().channels().not_searching_by_cid().values() {
+    //         for channel in get_context().ca_channels().not_searching_by_cid().values() {
     //             match channel.state() {
     //                 ChannelState::NameFound => name_found_count += 1,
     //                 ChannelState::TcpConnected => tcp_connected_count += 1,
@@ -73,7 +73,7 @@ async fn main() {
     //         }
     //         println!(
     //             "not sesarching {}, monitor running {}, name found  {}, tcp connected {}, created {}, waiting on tcp {}, no wait on tcp {}, self connect {}",
-    //             get_context().channels().not_searching_by_cid().len(),
+    //             get_context().ca_channels().not_searching_by_cid().len(),
     //             monitor_running_count,
     //             name_found_count,
     //             tcp_connected_count,
@@ -97,9 +97,9 @@ async fn main() {
     // let data = Arc::new(RwLock::new(0.0));
     // let data_for_callback = Arc::clone(&data);
 
-    // let channel1 = context.create_channel("val1");
-    // let channel5 = context.create_channel("val5");
-    // println!("{}", context.channels());
+    // let channel1 = context.create_ca_channel("val1");
+    // let channel5 = context.create_ca_channel("val5");
+    // println!("{}", context.ca_channels());
 
     // channel.get(channel::dbr::DbrType::StsDouble, 1).await;
     // channel1.get(Some(5.0), None, None, None).await;
@@ -127,7 +127,7 @@ async fn main() {
             // }
         },
     );
-    // let callback5 = move |channel: &Channel| {
+    // let callback5 = move |channel: &CaChannel| {
     //     debug!(
     //         "{} has a new value: {:?}, {}",
     //         channel.name(),
@@ -170,8 +170,8 @@ async fn main() {
     //     channel.monitor(),
     //     channel
     // );
-    // context.create_channel("val2afadsfsa");
-    // println!("{}", context.channels());
+    // context.create_ca_channel("val2afadsfsa");
+    // println!("{}", context.ca_channels());
 
     for ii in 0..100000 {
         let callback = Arc::clone(&callback1);
@@ -180,7 +180,7 @@ async fn main() {
         // tokio::spawn(async move {
         let name = format!("val{}", ii);
         // println!("{}", name);
-        let channel = context.create_channel(&name);
+        let channel = context.create_ca_channel(&name);
         channel.start_to_monitor(Some(MonitorDataType::NativeTime), None, Some(callback));
         // println!("-->{}", name);
         // });

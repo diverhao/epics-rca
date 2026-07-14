@@ -1,11 +1,11 @@
 use crate::alloc_stats;
 use crate::ca_message::header::CaHeader;
 use crate::ca_message::message::CaMsg;
-use crate::ca_channel::channel::{Channel, ChannelCallback};
-use crate::ca_channel::channels::{ChannelIo, Channels};
+use crate::ca_channel::ca_channel::{CaChannel, ChannelCallback};
+use crate::ca_channel::ca_channels::{CaChannels, ChannelIo};
 use crate::ca_channel::dbr::{DbrType, DbrValue};
-use crate::ca_channel::meta::Meta;
-use crate::ca_channel::monitor::{Monitor, MonitorConfig, MonitorData, MonitorDataType};
+use crate::ca_channel::ca_meta::CaMeta;
+use crate::ca_channel::ca_monitor::{CaMonitor, MonitorConfig, MonitorData, MonitorDataType};
 use crate::context::context::get_context;
 use crate::spawn_stats;
 use crate::tcp::tcp::{TCP, TCPs};
@@ -37,32 +37,32 @@ fn print_type_sizes_once() {
 
 fn print_type_sizes() {
     println!("type sizes:");
-    print_type::<Channel>("Channel");
-    print_type::<Meta>("Meta");
-    print_type::<Monitor>("Monitor");
+    print_type::<CaChannel>("CaChannel");
+    print_type::<CaMeta>("CaMeta");
+    print_type::<CaMonitor>("CaMonitor");
     print_type::<MonitorData>("MonitorData");
     print_type::<MonitorConfig>("MonitorConfig");
     print_type::<TCP>("TCP");
     print_type::<TCPs>("TCPs");
     print_type::<UDP>("UDP");
-    print_type::<Channels>("Channels");
+    print_type::<CaChannels>("CaChannels");
     print_type::<ChannelIo>("ChannelIo");
     print_type::<CaMsg>("CaMsg");
     print_type::<CaHeader>("CaHeader");
     print_type::<DbrType>("DbrType");
     print_type::<DbrValue>("DbrValue");
     print_type::<MonitorDataType>("MonitorDataType");
-    print_type::<Arc<Channel>>("Arc<Channel>");
+    print_type::<Arc<CaChannel>>("Arc<CaChannel>");
     print_type::<ChannelCallback>("ChannelCallback");
     print_type::<String>("String");
     print_type::<Box<str>>("Box<str>");
     print_type::<Vec<u8>>("Vec<u8>");
     print_type::<Vec<SocketAddr>>("Vec<SocketAddr>");
     print_type::<VecDeque<CaMsg>>("VecDeque<CaMsg>");
-    print_type::<HashMap<u32, Arc<Channel>>>("HashMap<u32, Arc<Channel>>");
-    print_type::<HashMap<String, Arc<Channel>>>("HashMap<String, Arc<Channel>>");
+    print_type::<HashMap<u32, Arc<CaChannel>>>("HashMap<u32, Arc<CaChannel>>");
+    print_type::<HashMap<String, Arc<CaChannel>>>("HashMap<String, Arc<CaChannel>>");
     print_type::<SocketAddr>("SocketAddr");
-    print_type::<RwLock<Meta>>("RwLock<Meta>");
+    print_type::<RwLock<CaMeta>>("RwLock<CaMeta>");
     print_type::<RwLock<Option<SocketAddr>>>("RwLock<Option<SocketAddr>>");
     print_type::<RwLock<Vec<u32>>>("RwLock<Vec<u32>>");
     print_type::<Mutex<Option<()>>>("tokio::Mutex<Option<()>>");
@@ -157,7 +157,7 @@ fn print_traffic_stats() {
 
 fn print_container_stats() {
     let context = get_context();
-    let channel_stats = context.channels().capacity_stats();
+    let channel_stats = context.ca_channels().capacity_stats();
     let tcp_stats = context.tcps().capacity_stats();
 
     println!(

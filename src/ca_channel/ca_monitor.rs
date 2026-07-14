@@ -1,4 +1,4 @@
-use crate::ca_channel::channel::{Channel, ChannelCallback};
+use crate::ca_channel::ca_channel::{CaChannel, ChannelCallback};
 use crate::context::context::get_context;
 use core::num;
 use std::net::SocketAddr;
@@ -33,7 +33,7 @@ pub enum MonitorDataType {
     NativeCtrl,
 }
 impl MonitorDataType {
-    pub fn resolve(self, channel: &Channel) -> DbrType {
+    pub fn resolve(self, channel: &CaChannel) -> DbrType {
         match self {
             MonitorDataType::Exact(data_type) => data_type,
             MonitorDataType::Native => channel.data_type_native(),
@@ -50,7 +50,7 @@ pub struct MonitorConfig {
     pub data_count: Option<u32>,
 }
 
-pub struct Monitor {
+pub struct CaMonitor {
     pub state: MonitorState,
     pub data_type: DbrType,
     pub data_count: u32,
@@ -58,9 +58,9 @@ pub struct Monitor {
     pub user_config: MonitorConfig,
 }
 
-impl Monitor {
-    pub fn new() -> Monitor {
-        Monitor {
+impl CaMonitor {
+    pub fn new() -> CaMonitor {
+        CaMonitor {
             state: MonitorState::NotRunning,
             data_type: DbrType::Double,
             data_count: 0,
@@ -134,7 +134,7 @@ impl Monitor {
     }
 }
 
-impl std::fmt::Display for Monitor {
+impl std::fmt::Display for CaMonitor {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         let callback = if self.callback.is_some() {
             "Some"
@@ -142,7 +142,7 @@ impl std::fmt::Display for Monitor {
             "None"
         };
 
-        writeln!(f, "Monitor {{")?;
+        writeln!(f, "CaMonitor {{")?;
         writeln!(f, "    state: {:?},", self.state)?;
         writeln!(f, "    data_type: {:?},", self.data_type)?;
         writeln!(f, "    data_count: {},", self.data_count)?;
@@ -151,7 +151,7 @@ impl std::fmt::Display for Monitor {
     }
 }
 
-impl Channel {
+impl CaChannel {
     // ------------ start/cancel monitor --------
 
     /**

@@ -1,6 +1,6 @@
-pub mod channel;
-pub mod channels;
+pub mod ca_channel;
+pub mod ca_channels;
 pub mod dbr;
 pub mod dbr_data;
-pub mod meta;
-pub mod monitor;
+pub mod ca_meta;
+pub mod ca_monitor;

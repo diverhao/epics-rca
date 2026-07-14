@@ -7,8 +7,8 @@ use ::log::info;
 use std::sync::Arc;
 use std::sync::OnceLock;
 
-use crate::ca_channel::channel::Channel;
-use crate::ca_channel::channels::Channels;
+use crate::ca_channel::ca_channel::CaChannel;
+use crate::ca_channel::ca_channels::CaChannels;
 use crate::tcp::tcp::TCPs;
 
 /**
@@ -23,8 +23,8 @@ pub static CONTEXT: OnceLock<Arc<Context>> = OnceLock::new();
 pub struct Context {
     env: Env,
     udp: Arc<UDP>,
-    tcps: Arc<TCPs>,
-    channels: Arc<Channels>,
+    ca_tcps: Arc<TCPs>,
+    ca_channels: Arc<CaChannels>,
 }
 /**
  * Access point for the client runtime state. Can be accessed by calling
@@ -55,14 +55,14 @@ impl Context {
         let udp: Arc<UDP> = Arc::new(UDP::new(&env).await);
         Arc::clone(&udp).start_to_listen();
 
-        let channels = Channels::new();
-        let tcps = TCPs::new();
+        let ca_channels = CaChannels::new();
+        let ca_tcps = TCPs::new();
 
         let context = Context {
             env,
             udp: Arc::clone(&udp),
-            tcps: Arc::new(tcps),
-            channels: Arc::new(channels),
+            ca_tcps: Arc::new(ca_tcps),
+            ca_channels: Arc::new(ca_channels),
         };
 
         info!(
@@ -77,18 +77,18 @@ impl Context {
 
     // -------------- channel ----------------------------
 
-    pub fn create_channel(self: &Self, name: &str) -> Arc<Channel> {
-        let channels = self.channels();
+    pub fn create_ca_channel(self: &Self, name: &str) -> Arc<CaChannel> {
+        let channels = self.ca_channels();
         channels.create_channel(name)
     }
 
-    pub fn create_channels(self: &Self, names: Vec<String>) {
-        let channels = self.channels();
+    pub fn create_ca_channels(self: &Self, names: Vec<String>) {
+        let channels = self.ca_channels();
         channels.create_channels(names)
     }
 
     pub fn start_search_ca(self: &Self) {
-        let channels = self.channels();
+        let channels = self.ca_channels();
         channels.start_search_ca();
     }
 
@@ -110,12 +110,12 @@ impl Context {
         &self.env
     }
 
-    pub fn channels(self: &Self) -> Arc<Channels> {
-        Arc::clone(&self.channels)
+    pub fn ca_channels(self: &Self) -> Arc<CaChannels> {
+        Arc::clone(&self.ca_channels)
     }
 
     pub fn tcps(self: &Self) -> Arc<TCPs> {
-        Arc::clone(&self.tcps)
+        Arc::clone(&self.ca_tcps)
     }
 }
 

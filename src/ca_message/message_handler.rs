@@ -1,9 +1,9 @@
-use crate::ca_channel::channel::Channel;
+use crate::ca_channel::ca_channel::CaChannel;
 use crate::ca_channel::dbr::{ChannelAccessRights, ChannelSeverity, ChannelState, ChannelStatus};
 use crate::ca_channel::dbr::{DbrType, DbrValue};
 use crate::ca_channel::dbr_data::DbrData;
-use crate::ca_channel::monitor::{Monitor, MonitorState};
-use crate::ca_channel::{self, monitor};
+use crate::ca_channel::ca_monitor::{CaMonitor, MonitorState};
+use crate::ca_channel::{self, ca_monitor};
 use crate::ca_message::cmd::CaCmd;
 use crate::ca_message::message::{CA_MINOR_VERSION, CaMsg, SearchReplyFlag};
 use crate::context::context::get_context;
@@ -110,10 +110,10 @@ pub fn handle_ca_proto_search(msg: CaMsg) {
     let search_id = msg.header().param2;
     let server_port = msg.header().data_type;
     let context = get_context();
-    let channels = context.channels();
+    let channels = context.ca_channels();
 
     // find the channel
-    let channel: Arc<Channel> = match channels.channel_by_cid(search_id) {
+    let channel: Arc<CaChannel> = match channels.channel_by_cid(search_id) {
         Some(channel) => channel,
         None => return, // channel not found
     };
@@ -162,7 +162,7 @@ fn handle_ca_proto_access_rights(msg: CaMsg) {
     // get channel
     let cid = msg.header().param1;
     let context = get_context();
-    let channels = context.channels();
+    let channels = context.ca_channels();
     let channel = match channels.channel_by_cid(cid) {
         Some(channel) => channel,
         None => {
@@ -184,7 +184,7 @@ fn handle_ca_proto_create_chan(msg: CaMsg) {
     let sid = msg.header().param2;
     let data_count = msg.header().data_count;
     let context = get_context();
-    let channels = context.channels();
+    let channels = context.ca_channels();
     let channel = match channels.channel_by_cid(cid) {
         Some(channel) => channel,
         None => return, // cannot find channel in Channels registry, may have been destroyed
@@ -215,12 +215,12 @@ fn handle_ca_proto_read_notify(msg: CaMsg) -> bool {
     // tell the get() to proceed
     let ioid = msg.header().param2;
 
-    let io = match get_context().channels().io(ioid) {
+    let io = match get_context().ca_channels().io(ioid) {
         Some(io) => io,
         None => return true,
     };
     let cid = io.cid;
-    let channel = match get_context().channels().channel_by_cid(cid) {
+    let channel = match get_context().ca_channels().channel_by_cid(cid) {
         Some(channel) => channel,
         None => return true,
     };
@@ -251,7 +251,7 @@ fn handle_ca_proto_event_add(msg: CaMsg) -> bool {
         }
     };
 
-    let channel = match get_context().channels().channel_by_cid(subid) {
+    let channel = match get_context().ca_channels().channel_by_cid(subid) {
         Some(channel) => channel,
         None => return true, // cannot find channel in Channels registry
     };
@@ -326,7 +326,7 @@ fn handle_ca_proto_clear_channel(_msg: CaMsg) {
 
 fn handle_ca_proto_create_ch_fail(msg: CaMsg) {
     let cid = msg.header().param1;
-    if let Some(channel) = get_context().channels().channel_by_cid(cid) {
+    if let Some(channel) = get_context().ca_channels().channel_by_cid(cid) {
         tokio::spawn(async move {
             channel.reconnect().await;
         });

@@ -1,4 +1,4 @@
-use crate::ca_channel::channel::Channel;
+use crate::ca_channel::ca_channel::CaChannel;
 use crate::context::context::get_context;
 use core::num;
 use std::net::SocketAddr;
@@ -13,7 +13,7 @@ use crate::ca_channel::dbr::{DbrType, DbrValue};
 use crate::ca_message::message::CaMsg;
 use log::{debug, error, warn};
 
-pub struct Meta {
+pub struct CaMeta {
     pub state: ChannelState,
     pub sid: u32, // server ID, assigned after channel created on server
     pub addr: Option<SocketAddr>,
@@ -22,9 +22,9 @@ pub struct Meta {
     pub data_count_native: u32,
 }
 
-impl Meta {
-    pub fn new() -> Meta {
-        Meta {
+impl CaMeta {
+    pub fn new() -> CaMeta {
+        CaMeta {
             state: ChannelState::NameSearching,
             sid: 0,
             addr: None,
@@ -95,9 +95,9 @@ impl Meta {
     }
 }
 
-impl std::fmt::Display for Meta {
+impl std::fmt::Display for CaMeta {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        writeln!(f, "Meta {{")?;
+        writeln!(f, "CaMeta {{")?;
         writeln!(f, "    state: {:?},", self.state())?;
         writeln!(f, "    access_right: {:?},", self.access_right())?;
         writeln!(f, "    data_type_native: {:?},", self.data_type_native())?;
@@ -106,7 +106,7 @@ impl std::fmt::Display for Meta {
     }
 }
 
-impl Channel {
+impl CaChannel {
     // ------------------ getters ----------------
 
     pub fn state(&self) -> ChannelState {
@@ -134,7 +134,7 @@ impl Channel {
     pub fn set_state(&self, new_state: ChannelState, notify_state: bool) {
         let old_state = self.state();
 
-        let channels = get_context().channels();
+        let channels = get_context().ca_channels();
         if old_state == ChannelState::NameSearching
             && (new_state == ChannelState::Destroyed
                 || new_state == ChannelState::Created

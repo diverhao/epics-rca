@@ -1,11 +1,11 @@
 use crate::ca_channel;
-use crate::ca_channel::channel::ChannelCallback;
+use crate::ca_channel::ca_channel::ChannelCallback;
 use crate::ca_channel::dbr::{ChannelAccessRights, ChannelSeverity, ChannelState, ChannelStatus};
 use crate::ca_channel::dbr::{DbrType, DbrValue};
-use crate::ca_channel::monitor::{MonitorDataType, MonitorState};
+use crate::ca_channel::ca_monitor::{MonitorDataType, MonitorState};
 use crate::ca_message::message::{CaMsg, MAX_UDP_SEND};
 use crate::env::env::EnvType;
-use crate::{ca_channel::channel::Channel, context::context::get_context};
+use crate::{ca_channel::ca_channel::CaChannel, context::context::get_context};
 use log::{debug, warn};
 use std::char::MAX;
 use std::collections::HashMap;
@@ -26,9 +26,9 @@ pub struct ChannelIo {
     pub data_count: Option<u32>,
 }
 
-pub struct Channels {
-    searching_by_cid: RwLock<HashMap<u32, Arc<Channel>>>,
-    not_searching_by_cid: RwLock<HashMap<u32, Arc<Channel>>>,
+pub struct CaChannels {
+    searching_by_cid: RwLock<HashMap<u32, Arc<CaChannel>>>,
+    not_searching_by_cid: RwLock<HashMap<u32, Arc<CaChannel>>>,
     next_cid: AtomicU32,
     next_ioid: AtomicU32, // read and write
     searching_ca: AtomicBool,
@@ -36,7 +36,7 @@ pub struct Channels {
     pub resolved_count: AtomicU32,
 }
 
-impl Channels {
+impl CaChannels {
     pub fn new() -> Self {
         Self {
             searching_by_cid: RwLock::new(HashMap::new()),
@@ -49,9 +49,9 @@ impl Channels {
         }
     }
 
-    pub fn create_channel(self: &Self, name: &str) -> Arc<Channel> {
+    pub fn create_channel(self: &Self, name: &str) -> Arc<CaChannel> {
         let id = self.next_cid();
-        let channel = Arc::new(Channel::new(name, id));
+        let channel = Arc::new(CaChannel::new(name, id));
 
         let mut by_cid = self.searching_by_cid_mut();
         by_cid.insert(id, Arc::clone(&channel));
@@ -75,11 +75,11 @@ impl Channels {
     }
 
     pub async fn destroy_channels(self: &Self) {
-        let channels: Vec<Arc<Channel>> = self.searching_by_cid().values().cloned().collect();
+        let channels: Vec<Arc<CaChannel>> = self.searching_by_cid().values().cloned().collect();
         for channel in channels {
             channel.destroy().await;
         }
-        let channels: Vec<Arc<Channel>> = self.not_searching_by_cid().values().cloned().collect();
+        let channels: Vec<Arc<CaChannel>> = self.not_searching_by_cid().values().cloned().collect();
         for channel in channels {
             channel.destroy().await;
         }
@@ -145,25 +145,25 @@ impl Channels {
 
     // -------------- channels -----------------
 
-    pub fn searching_by_cid(self: &Self) -> RwLockReadGuard<'_, HashMap<u32, Arc<Channel>>> {
+    pub fn searching_by_cid(self: &Self) -> RwLockReadGuard<'_, HashMap<u32, Arc<CaChannel>>> {
         self.searching_by_cid.read().unwrap()
     }
 
-    pub fn searching_by_cid_mut(self: &Self) -> RwLockWriteGuard<'_, HashMap<u32, Arc<Channel>>> {
+    pub fn searching_by_cid_mut(self: &Self) -> RwLockWriteGuard<'_, HashMap<u32, Arc<CaChannel>>> {
         self.searching_by_cid.write().unwrap()
     }
 
-    pub fn not_searching_by_cid(self: &Self) -> RwLockReadGuard<'_, HashMap<u32, Arc<Channel>>> {
+    pub fn not_searching_by_cid(self: &Self) -> RwLockReadGuard<'_, HashMap<u32, Arc<CaChannel>>> {
         self.not_searching_by_cid.read().unwrap()
     }
 
     pub fn not_searching_by_cid_mut(
         self: &Self,
-    ) -> RwLockWriteGuard<'_, HashMap<u32, Arc<Channel>>> {
+    ) -> RwLockWriteGuard<'_, HashMap<u32, Arc<CaChannel>>> {
         self.not_searching_by_cid.write().unwrap()
     }
 
-    pub fn channel_by_cid(self: &Self, cid: u32) -> Option<Arc<Channel>> {
+    pub fn channel_by_cid(self: &Self, cid: u32) -> Option<Arc<CaChannel>> {
         let searching = self.searching_by_cid();
         let not_searching = self.not_searching_by_cid();
 
@@ -187,12 +187,12 @@ impl Channels {
         self.not_searching_by_cid_mut().remove(&cid);
     }
 
-    pub fn searching_channel_by_cid(self: &Self, cid: u32) -> Option<Arc<Channel>> {
+    pub fn searching_channel_by_cid(self: &Self, cid: u32) -> Option<Arc<CaChannel>> {
         let by_cid = self.searching_by_cid();
         by_cid.get(&cid).cloned()
     }
 
-    pub fn not_searching_channel_by_cid(self: &Self, cid: u32) -> Option<Arc<Channel>> {
+    pub fn not_searching_channel_by_cid(self: &Self, cid: u32) -> Option<Arc<CaChannel>> {
         let by_cid = self.not_searching_by_cid();
         by_cid.get(&cid).cloned()
     }
@@ -380,7 +380,7 @@ impl Channels {
     }
 }
 
-impl fmt::Display for Channels {
+impl fmt::Display for CaChannels {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         let mut ios: Vec<(u32, u32)> = self
             .ios()
@@ -389,11 +389,11 @@ impl fmt::Display for Channels {
             .collect();
         ios.sort_by_key(|(ioid, _)| *ioid);
 
-        let mut channels: Vec<Arc<Channel>> = self.searching_by_cid().values().cloned().collect();
+        let mut channels: Vec<Arc<CaChannel>> = self.searching_by_cid().values().cloned().collect();
         channels.extend(self.not_searching_by_cid().values().cloned());
         channels.sort_by_key(|channel| channel.cid());
 
-        writeln!(f, "Channels {{")?;
+        writeln!(f, "CaChannels {{")?;
         writeln!(f, "    ios:")?;
         writeln!(f, "        |ioid|cid|")?;
         for (ioid, cid) in ios {

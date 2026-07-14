@@ -1,8 +1,8 @@
 use crate::ca_channel::dbr::{ChannelAccessRights, ChannelSeverity, ChannelState, ChannelStatus};
 use crate::ca_channel::dbr::{DbrType, DbrValue};
 use crate::ca_channel::dbr_data::{self, DbrData};
-use crate::ca_channel::meta::Meta;
-use crate::ca_channel::monitor::{self, Monitor, MonitorDataType, MonitorState};
+use crate::ca_channel::ca_meta::CaMeta;
+use crate::ca_channel::ca_monitor::{self, CaMonitor, MonitorDataType, MonitorState};
 use crate::ca_message::message::CaMsg;
 use crate::context::context::get_context;
 use crate::tcp::tcp::TCP;
@@ -20,28 +20,28 @@ use tokio::time::timeout;
 // channel monitor callback function
 pub type ChannelCallback = Arc<dyn Fn(u32, DbrType, u32, &DbrData) + Send + Sync + 'static>;
 
-pub struct Channel {
+pub struct CaChannel {
     // fixed, never change
     name: String,
     cid: u32, // client ID
     // dynamic data
     // from server, sid, access right, data count, data type,
     // search: state, server address
-    meta: RwLock<Meta>,
+    meta: RwLock<CaMeta>,
     search_counter: AtomicU32,
     state_change_notifier: Notify,
-    monitor: RwLock<Monitor>,
+    monitor: RwLock<CaMonitor>,
 }
 
-impl Channel {
+impl CaChannel {
     pub fn new(name: &str, cid: u32) -> Self {
-        Channel {
+        CaChannel {
             name: name.to_string(),
             cid: cid,
             search_counter: AtomicU32::new(1),
-            meta: RwLock::new(Meta::new()),
+            meta: RwLock::new(CaMeta::new()),
             state_change_notifier: Notify::new(),
-            monitor: RwLock::new(Monitor::new()),
+            monitor: RwLock::new(CaMonitor::new()),
         }
     }
 
@@ -127,7 +127,7 @@ impl Channel {
         debug!("Destroying the channel");
 
         let context = get_context();
-        let channels = context.channels();
+        let channels = context.ca_channels();
 
         // Get current states for later use
         let addr: Option<SocketAddr> = self.addr();
@@ -223,7 +223,7 @@ impl Channel {
         self.meta_mut().reset();
         self.set_addr(None);
         self.set_addr(None);
-        get_context().channels().remove_io_by_cid(self.cid());
+        get_context().ca_channels().remove_io_by_cid(self.cid());
         self.set_state(ChannelState::NameSearching, false);
     }
 
@@ -238,7 +238,7 @@ impl Channel {
         callback: Option<ChannelCallback>,
     ) {
         let context = get_context();
-        let ioid: u32 = context.channels().next_ioid();
+        let ioid: u32 = context.ca_channels().next_ioid();
         let cid = self.cid();
 
         let timeout_sec = {
@@ -252,7 +252,7 @@ impl Channel {
         if state != ChannelState::Created {
             // append IO
             get_context()
-                .channels()
+                .ca_channels()
                 .add_io(ioid, cid, data_type, data_count, callback);
             return;
         }
@@ -273,7 +273,7 @@ impl Channel {
             Some(data_type) => data_type,
             None => {
                 // remove this IO
-                get_context().channels().remove_io_by_ioid(ioid);
+                get_context().ca_channels().remove_io_by_ioid(ioid);
                 return Err("DBR decode error: invalid data type".to_string());
             }
         };
@@ -281,7 +281,7 @@ impl Channel {
         let dbr_data = DbrData::from_buf(msg.payload(), data_type, data_count);
 
         // remove and get IO
-        let io = match get_context().channels().remove_io_by_ioid(ioid) {
+        let io = match get_context().ca_channels().remove_io_by_ioid(ioid) {
             Some(io) => io,
             None => return Err("No IO ID".to_string()), // no side effect, just return
         };
@@ -308,7 +308,7 @@ impl Channel {
     pub fn get_step_2(self: &Self) {
         // get all IOs of this channel
         let cid = self.cid();
-        let ios = get_context().channels().ios_of_cid(cid);
+        let ios = get_context().ca_channels().ios_of_cid(cid);
 
         for (ioid, io) in ios {
             let sid = self.sid();
@@ -373,19 +373,19 @@ impl Channel {
         &self.name
     }
 
-    pub fn meta(&self) -> RwLockReadGuard<'_, Meta> {
+    pub fn meta(&self) -> RwLockReadGuard<'_, CaMeta> {
         self.meta.read().unwrap()
     }
 
-    pub fn meta_mut(&self) -> RwLockWriteGuard<'_, Meta> {
+    pub fn meta_mut(&self) -> RwLockWriteGuard<'_, CaMeta> {
         self.meta.write().unwrap()
     }
 
-    pub fn monitor(self: &Self) -> RwLockReadGuard<'_, Monitor> {
+    pub fn monitor(self: &Self) -> RwLockReadGuard<'_, CaMonitor> {
         self.monitor.read().unwrap()
     }
 
-    pub fn monitor_mut(self: &Self) -> RwLockWriteGuard<'_, Monitor> {
+    pub fn monitor_mut(self: &Self) -> RwLockWriteGuard<'_, CaMonitor> {
         self.monitor.write().unwrap()
     }
 
@@ -437,7 +437,7 @@ impl Channel {
     }
 }
 
-impl std::fmt::Display for Channel {
+impl std::fmt::Display for CaChannel {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         let meta = self.meta().to_string().replace('\n', "\n    ");
         let monitor = self.monitor().to_string().replace('\n', "\n    ");
