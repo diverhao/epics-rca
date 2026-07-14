@@ -8,6 +8,7 @@ mod env;
 mod pva_message;
 mod tcp;
 mod udp;
+mod pva_channel;
 
 use crate::ca_channel::channel::Channel;
 use crate::ca_channel::dbr::ChannelState;

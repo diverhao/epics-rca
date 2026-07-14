@@ -113,20 +113,7 @@ impl Channel {
         let host_name_msg = CaMsg::build_host_name(&dests);
         let create_chan_msg = CaMsg::build_create_chan(self.name(), self.cid(), &dests);
 
-        tcp.send_msgs(vec![
-            // version_msg,
-            // client_name_msg,
-            // host_name_msg,
-            create_chan_msg,
-        ]);
-        //     .await
-        // {
-        //     Ok(_) => {}
-        //     Err(error) => {
-        //         // reconnect channel, TCP's lifecycle is handled by its check alive task
-        //         self.reconnect().await;
-        //     }
-        // };
+        tcp.send_msgs(vec![create_chan_msg]);
     }
 
     /**
