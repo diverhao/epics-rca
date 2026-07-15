@@ -1,70 +1,57 @@
 #[derive(Copy, Clone, Debug, Eq, PartialEq, Hash)]
 pub enum PvaCmd {
-    App(AppCmd),
-    Ctrl(CtrlCmd),
+    Beacon,               // 0x00
+    ConnectionValidation, // 0x01
+    Echo,                 // 0x02
+    Search,               // 0x03
+    SearchResponse,       // 0x04
+    Authnz,               // 0x05
+    AclChange,            // 0x06
+    CreateChannel,        // 0x07
+    DestroyChannel,       // 0x08
+    ConnectionValidated,  // 0x09
+    Get,                  // 0x0A
+    Put,                  // 0x0B
+    PutGet,               // 0x0C
+    Monitor,              // 0x0D
+    Array,                // 0x0E
+    DestroyRequest,       // 0x0F
+    Process,              // 0x10
+    GetField,             // 0x11
+    Message,              // 0x12
+    MultipleData,         // 0x13
+    Rpc,                  // 0x14
+    CancelRequest,        // 0x15
+    OriginTag,            // 0x16
 }
 
 impl PvaCmd {
     pub fn to_u8(self) -> u8 {
         match self {
-            Self::App(cmd) => cmd.to_u8(),
-            Self::Ctrl(cmd) => cmd.to_u8(),
+            Self::Beacon => 0x00,
+            Self::ConnectionValidation => 0x01,
+            Self::Echo => 0x02,
+            Self::Search => 0x03,
+            Self::SearchResponse => 0x04,
+            Self::Authnz => 0x05,
+            Self::AclChange => 0x06,
+            Self::CreateChannel => 0x07,
+            Self::DestroyChannel => 0x08,
+            Self::ConnectionValidated => 0x09,
+            Self::Get => 0x0a,
+            Self::Put => 0x0b,
+            Self::PutGet => 0x0c,
+            Self::Monitor => 0x0d,
+            Self::Array => 0x0e,
+            Self::DestroyRequest => 0x0f,
+            Self::Process => 0x10,
+            Self::GetField => 0x11,
+            Self::Message => 0x12,
+            Self::MultipleData => 0x13,
+            Self::Rpc => 0x14,
+            Self::CancelRequest => 0x15,
+            Self::OriginTag => 0x16,
         }
-    }
-
-    pub fn from_u8(is_control: bool, value: u8) -> Option<Self> {
-        if is_control {
-            CtrlCmd::from_u8(value).map(Self::Ctrl)
-        } else {
-            AppCmd::from_u8(value).map(Self::App)
-        }
-    }
-
-    pub fn is_control(self) -> bool {
-        matches!(self, Self::Ctrl(_))
-    }
-}
-
-impl std::fmt::Display for PvaCmd {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            Self::App(cmd) => cmd.fmt(f),
-            Self::Ctrl(cmd) => cmd.fmt(f),
-        }
-    }
-}
-
-#[repr(u8)]
-#[derive(Copy, Clone, Debug, Eq, PartialEq, Hash)]
-pub enum AppCmd {
-    Beacon = 0x00,
-    ConnectionValidation = 0x01,
-    Echo = 0x02,
-    Search = 0x03,
-    SearchResponse = 0x04,
-    Authnz = 0x05,
-    AclChange = 0x06,
-    CreateChannel = 0x07,
-    DestroyChannel = 0x08,
-    ConnectionValidated = 0x09,
-    Get = 0x0a,
-    Put = 0x0b,
-    PutGet = 0x0c,
-    Monitor = 0x0d,
-    Array = 0x0e,
-    DestroyRequest = 0x0f,
-    Process = 0x10,
-    GetField = 0x11,
-    Message = 0x12,
-    MultipleData = 0x13,
-    Rpc = 0x14,
-    CancelRequest = 0x15,
-    OriginTag = 0x16,
-}
-
-impl AppCmd {
-    pub fn to_u8(self) -> u8 {
-        self as u8
     }
 
     pub fn from_u8(value: u8) -> Option<Self> {
@@ -97,7 +84,7 @@ impl AppCmd {
     }
 }
 
-impl std::fmt::Display for AppCmd {
+impl std::fmt::Display for PvaCmd {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.write_str(match self {
             Self::Beacon => "CMD_BEACON",
@@ -127,37 +114,53 @@ impl std::fmt::Display for AppCmd {
     }
 }
 
-// --------------------------------
-
-#[repr(u8)]
 #[derive(Copy, Clone, Debug, Eq, PartialEq, Hash)]
-pub enum CtrlCmd {
-    SetMarker = 0x00,
-    AckMarker = 0x01,
-    SetEndianess = 0x02,
+pub enum PvaCtrlCmd {
+    CtrlSetMarker, // 0x00
+    CtrlAckMarker, // 0x01
+    SetEndianess,  // 0x02
 }
 
-impl CtrlCmd {
+impl PvaCtrlCmd {
     pub fn to_u8(self) -> u8 {
-        self as u8
+        match self {
+            Self::CtrlSetMarker => 0x00,
+            Self::CtrlAckMarker => 0x01,
+            Self::SetEndianess => 0x02,
+        }
     }
 
     pub fn from_u8(value: u8) -> Option<Self> {
         match value {
-            0x00 => Some(Self::SetMarker),
-            0x01 => Some(Self::AckMarker),
+            0x00 => Some(Self::CtrlSetMarker),
+            0x01 => Some(Self::CtrlAckMarker),
             0x02 => Some(Self::SetEndianess),
             _ => None,
         }
     }
 }
 
-impl std::fmt::Display for CtrlCmd {
+impl std::fmt::Display for PvaCtrlCmd {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.write_str(match self {
-            Self::SetMarker => "CMD_SET_MARKER",
-            Self::AckMarker => "CMD_ACK_MARKER",
+            Self::CtrlSetMarker => "CMD_SET_MARKER",
+            Self::CtrlAckMarker => "CMD_ACK_MARKER",
             Self::SetEndianess => "CMD_SET_ENDIANESS",
         })
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{PvaCmd, PvaCtrlCmd};
+
+    #[test]
+    fn decodes_overlapping_application_and_control_commands() {
+        assert_eq!(PvaCmd::from_u8(0x00), Some(PvaCmd::Beacon));
+        assert_eq!(PvaCtrlCmd::from_u8(0x00), Some(PvaCtrlCmd::CtrlSetMarker));
+        assert_eq!(PvaCmd::from_u8(0x01), Some(PvaCmd::ConnectionValidation));
+        assert_eq!(PvaCtrlCmd::from_u8(0x01), Some(PvaCtrlCmd::CtrlAckMarker));
+        assert_eq!(PvaCmd::from_u8(0x02), Some(PvaCmd::Echo));
+        assert_eq!(PvaCtrlCmd::from_u8(0x02), Some(PvaCtrlCmd::SetEndianess));
     }
 }

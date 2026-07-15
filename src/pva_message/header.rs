@@ -1,4 +1,4 @@
-use crate::pva_message::cmd::{AppCmd, CtrlCmd, PvaCmd};
+use crate::pva_message::cmd::{PvaCmd, PvaCtrlCmd};
 
 const PVA_MAGIC: u8 = 0xca;
 const PVA_VERSION: u8 = 0x02;
@@ -110,13 +110,7 @@ impl MsgFlags {
     }
 }
 
-// --------------- header ----------------
-
-#[derive(Copy, Clone, Debug, Eq, PartialEq)]
-pub enum PvaHeaderData {
-    ApplicationPayloadSize(i32),
-    ControlData(i32),
-}
+// --------------- application header ----------------
 
 #[derive(Copy, Clone, Debug, Eq, PartialEq)]
 pub struct PvaHeader {
@@ -124,18 +118,18 @@ pub struct PvaHeader {
     version: u8,
     flags: MsgFlags,
     cmd: PvaCmd,
-    data: PvaHeaderData,
+    payload_size: i32,
 }
 
 impl PvaHeader {
-    pub fn new_application(
+    pub fn new(
         seg_type: MsgSeg,
         src: MsgSrc,
         endian: MsgEndian,
-        cmd: AppCmd,
+        cmd: PvaCmd,
         payload_size: i32,
-    ) -> Result<PvaHeader, String> {
-        let header = PvaHeader {
+    ) -> Result<Self, String> {
+        let header = Self {
             magic: PVA_MAGIC,
             version: PVA_VERSION,
             flags: MsgFlags {
@@ -144,26 +138,11 @@ impl PvaHeader {
                 src,
                 endian,
             },
-            cmd: PvaCmd::App(cmd),
-            data: PvaHeaderData::ApplicationPayloadSize(payload_size),
+            cmd,
+            payload_size,
         };
         header.validate()?;
         Ok(header)
-    }
-
-    pub fn new_control(src: MsgSrc, endian: MsgEndian, cmd: CtrlCmd, data: i32) -> PvaHeader {
-        PvaHeader {
-            magic: PVA_MAGIC,
-            version: PVA_VERSION,
-            flags: MsgFlags {
-                msg_type: MsgType::Control,
-                seg_type: MsgSeg::NotSeg,
-                src,
-                endian,
-            },
-            cmd: PvaCmd::Ctrl(cmd),
-            data: PvaHeaderData::ControlData(data),
-        }
     }
 
     pub fn magic(&self) -> u8 {
@@ -182,138 +161,149 @@ impl PvaHeader {
         self.cmd
     }
 
-    pub fn data(&self) -> PvaHeaderData {
-        self.data
-    }
-
-    pub fn payload_size(&self) -> Option<i32> {
-        match self.data {
-            PvaHeaderData::ApplicationPayloadSize(size) => Some(size),
-            PvaHeaderData::ControlData(_) => None,
-        }
-    }
-
-    pub fn control_data(&self) -> Option<i32> {
-        match self.data {
-            PvaHeaderData::ApplicationPayloadSize(_) => None,
-            PvaHeaderData::ControlData(data) => Some(data),
-        }
+    pub fn payload_size(&self) -> i32 {
+        self.payload_size
     }
 
     pub fn validate(&self) -> Result<(), String> {
-        if self.magic != PVA_MAGIC {
-            return Err(format!(
-                "Error: Invalid PVA magic 0x{:02X}; expected 0x{PVA_MAGIC:02X}",
-                self.magic
+        validate_common_header(self.magic, self.version)?;
+
+        if self.flags.msg_type != MsgType::Application {
+            return Err(String::from(
+                "Error: PVA application header has the control-message flag set",
             ));
         }
-
-        if self.version != PVA_VERSION {
+        if self.payload_size < 0 {
             return Err(format!(
-                "Error: Invalid PVA version {}; expected {PVA_VERSION}",
-                self.version
+                "Error: PVA application payload size cannot be negative: {}",
+                self.payload_size
             ));
-        }
-
-        match (self.flags.msg_type, self.cmd, self.data) {
-            (MsgType::Application, PvaCmd::App(_), PvaHeaderData::ApplicationPayloadSize(size)) => {
-                if size < 0 {
-                    return Err(format!(
-                        "Error: PVA application payload size cannot be negative: {size}"
-                    ));
-                }
-            }
-            (MsgType::Control, PvaCmd::Ctrl(_), PvaHeaderData::ControlData(_)) => {
-                if self.flags.seg_type != MsgSeg::NotSeg {
-                    return Err(String::from(
-                        "Error: PVA control message cannot be segmented",
-                    ));
-                }
-            }
-            _ => {
-                return Err(format!(
-                    "Error: Inconsistent PVA header message type, command {}, and data {:?}",
-                    self.cmd, self.data
-                ));
-            }
         }
 
         Ok(())
     }
 
-    pub fn to_buf(self: &Self) -> Result<Vec<u8>, String> {
+    pub fn to_buf(&self) -> Result<Vec<u8>, String> {
         self.validate()?;
-
-        let mut buf = Vec::with_capacity(PVA_HEADER_SIZE);
-        buf.push(self.magic);
-        buf.push(self.version);
-        buf.push(self.flags.to_u8());
-        buf.push(self.cmd.to_u8());
-
-        match (self.data, self.flags.endian) {
-            (PvaHeaderData::ApplicationPayloadSize(size), MsgEndian::Little) => {
-                buf.extend_from_slice(&size.to_le_bytes())
-            }
-            (PvaHeaderData::ApplicationPayloadSize(size), MsgEndian::Big) => {
-                buf.extend_from_slice(&size.to_be_bytes())
-            }
-            (PvaHeaderData::ControlData(data), MsgEndian::Little) => {
-                buf.extend_from_slice(&data.to_le_bytes())
-            }
-            (PvaHeaderData::ControlData(data), MsgEndian::Big) => {
-                buf.extend_from_slice(&data.to_be_bytes())
-            }
-        }
-
-        Ok(buf)
+        Ok(encode_header(
+            self.magic,
+            self.version,
+            self.flags,
+            self.cmd.to_u8(),
+            self.payload_size,
+        ))
     }
 
     pub fn from_buf(buf: &[u8]) -> Result<Self, String> {
-        if buf.len() < PVA_HEADER_SIZE {
+        let (magic, version, flags) = decode_header_prefix(buf)?;
+        if flags.msg_type != MsgType::Application {
             return Err(String::from(
-                "Warning: Remaining buffer too short for PVA header",
+                "Error: Expected a PVA application header, received a control header",
             ));
         }
 
-        let magic = buf[0];
-        if magic != PVA_MAGIC {
-            return Err(String::from("Error: Invalid PVA magic"));
+        let cmd = PvaCmd::from_u8(buf[3])
+            .ok_or_else(|| String::from("Error: Invalid PVA application command"))?;
+        let payload_size = decode_i32(&buf[4..8], flags.endian);
+        let header = Self {
+            magic,
+            version,
+            flags,
+            cmd,
+            payload_size,
+        };
+        header.validate()?;
+        Ok(header)
+    }
+}
+
+// --------------- control header ----------------
+
+#[derive(Copy, Clone, Debug, Eq, PartialEq)]
+pub struct PvaCtrlHeader {
+    magic: u8,
+    version: u8,
+    flags: MsgFlags,
+    cmd: PvaCtrlCmd,
+    data: i32,
+}
+
+impl PvaCtrlHeader {
+    pub fn new(src: MsgSrc, endian: MsgEndian, cmd: PvaCtrlCmd, data: i32) -> Result<Self, String> {
+        let header = Self {
+            magic: PVA_MAGIC,
+            version: PVA_VERSION,
+            flags: MsgFlags {
+                msg_type: MsgType::Control,
+                seg_type: MsgSeg::NotSeg,
+                src,
+                endian,
+            },
+            cmd,
+            data,
+        };
+        header.validate()?;
+        Ok(header)
+    }
+
+    pub fn magic(&self) -> u8 {
+        self.magic
+    }
+
+    pub fn version(&self) -> u8 {
+        self.version
+    }
+
+    pub fn flags(&self) -> MsgFlags {
+        self.flags
+    }
+
+    pub fn cmd(&self) -> PvaCtrlCmd {
+        self.cmd
+    }
+
+    pub fn data(&self) -> i32 {
+        self.data
+    }
+
+    pub fn validate(&self) -> Result<(), String> {
+        validate_common_header(self.magic, self.version)?;
+
+        if self.flags.msg_type != MsgType::Control {
+            return Err(String::from(
+                "Error: PVA control header does not have the control-message flag set",
+            ));
+        }
+        if self.flags.seg_type != MsgSeg::NotSeg {
+            return Err(String::from(
+                "Error: PVA control message cannot be segmented",
+            ));
+        }
+        Ok(())
+    }
+
+    pub fn to_buf(&self) -> Result<Vec<u8>, String> {
+        self.validate()?;
+        Ok(encode_header(
+            self.magic,
+            self.version,
+            self.flags,
+            self.cmd.to_u8(),
+            self.data,
+        ))
+    }
+
+    pub fn from_buf(buf: &[u8]) -> Result<Self, String> {
+        let (magic, version, flags) = decode_header_prefix(buf)?;
+        if flags.msg_type != MsgType::Control {
+            return Err(String::from(
+                "Error: Expected a PVA control header, received an application header",
+            ));
         }
 
-        let version = buf[1];
-        if version != PVA_VERSION {
-            return Err(String::from("Error: Invalid PVA version"));
-        }
-
-        let flags = match MsgFlags::from_u8(buf[2]) {
-            Some(flags) => flags,
-            None => return Err(String::from("Error: Invalid PVA header flags")),
-        };
-
-        let cmd = match PvaCmd::from_u8(flags.is_control(), buf[3]) {
-            Some(cmd) => cmd,
-            None => return Err(String::from("Error: Invalid PVA command")),
-        };
-
-        let data = match (flags.msg_type, flags.endian) {
-            (MsgType::Application, MsgEndian::Little) => {
-                PvaHeaderData::ApplicationPayloadSize(i32::from_le_bytes([
-                    buf[4], buf[5], buf[6], buf[7],
-                ]))
-            }
-            (MsgType::Application, MsgEndian::Big) => {
-                PvaHeaderData::ApplicationPayloadSize(i32::from_be_bytes([
-                    buf[4], buf[5], buf[6], buf[7],
-                ]))
-            }
-            (MsgType::Control, MsgEndian::Little) => {
-                PvaHeaderData::ControlData(i32::from_le_bytes([buf[4], buf[5], buf[6], buf[7]]))
-            }
-            (MsgType::Control, MsgEndian::Big) => {
-                PvaHeaderData::ControlData(i32::from_be_bytes([buf[4], buf[5], buf[6], buf[7]]))
-            }
-        };
-
+        let cmd = PvaCtrlCmd::from_u8(buf[3])
+            .ok_or_else(|| String::from("Error: Invalid PVA control command"))?;
+        let data = decode_i32(&buf[4..8], flags.endian);
         let header = Self {
             magic,
             version,
@@ -321,8 +311,57 @@ impl PvaHeader {
             cmd,
             data,
         };
-
         header.validate()?;
         Ok(header)
     }
+}
+
+fn validate_common_header(magic: u8, version: u8) -> Result<(), String> {
+    if magic != PVA_MAGIC {
+        return Err(format!(
+            "Error: Invalid PVA magic 0x{magic:02X}; expected 0x{PVA_MAGIC:02X}"
+        ));
+    }
+    if version != PVA_VERSION {
+        return Err(format!(
+            "Error: Invalid PVA version {version}; expected {PVA_VERSION}"
+        ));
+    }
+    Ok(())
+}
+
+fn decode_header_prefix(buf: &[u8]) -> Result<(u8, u8, MsgFlags), String> {
+    if buf.len() < PVA_HEADER_SIZE {
+        return Err(String::from(
+            "Warning: Remaining buffer too short for PVA header",
+        ));
+    }
+
+    let magic = buf[0];
+    let version = buf[1];
+    validate_common_header(magic, version)?;
+    let flags =
+        MsgFlags::from_u8(buf[2]).ok_or_else(|| String::from("Error: Invalid PVA header flags"))?;
+    Ok((magic, version, flags))
+}
+
+fn decode_i32(buf: &[u8], endian: MsgEndian) -> i32 {
+    let bytes = [buf[0], buf[1], buf[2], buf[3]];
+    match endian {
+        MsgEndian::Little => i32::from_le_bytes(bytes),
+        MsgEndian::Big => i32::from_be_bytes(bytes),
+    }
+}
+
+fn encode_header(magic: u8, version: u8, flags: MsgFlags, cmd: u8, value: i32) -> Vec<u8> {
+    let mut buf = Vec::with_capacity(PVA_HEADER_SIZE);
+    buf.push(magic);
+    buf.push(version);
+    buf.push(flags.to_u8());
+    buf.push(cmd);
+    match flags.endian {
+        MsgEndian::Little => buf.extend_from_slice(&value.to_le_bytes()),
+        MsgEndian::Big => buf.extend_from_slice(&value.to_be_bytes()),
+    }
+    buf
 }

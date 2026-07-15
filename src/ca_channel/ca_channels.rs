@@ -227,7 +227,7 @@ impl CaChannels {
     /**
      * Start periodic task to search
      */
-    pub fn start_search_ca(self: Arc<Self>) {
+    pub fn start_search(self: Arc<Self>) {
         // in case there is a second search_ca() invoked
         if self.searching_ca.swap(true, Ordering::AcqRel) {
             debug!("CA search is already running, skip this tick");
@@ -248,7 +248,7 @@ impl CaChannels {
 
             loop {
                 interval.tick().await;
-                self.search_ca().await;
+                self.search().await;
             }
         });
     }
@@ -256,7 +256,7 @@ impl CaChannels {
     /**
      * send out name search packets for all unconnected channels
      */
-    async fn search_ca(self: &Self) {
+    async fn search(self: &Self) {
         let context = get_context();
         let udp = context.udp();
 

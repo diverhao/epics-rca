@@ -89,7 +89,7 @@ impl Context {
 
     pub fn start_search_ca(self: &Self) {
         let channels = self.ca_channels();
-        channels.start_search_ca();
+        channels.start_search();
     }
 
     // -------------- getters and setters ----------------

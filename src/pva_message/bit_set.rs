@@ -1,4 +1,4 @@
-use std::sync::Arc;
+use std::{collections::BTreeSet, sync::Arc};
 
 use crate::pva_message::{
     complex::{PvaFieldType, PvaStructType, PvaStructValue},
@@ -64,7 +64,7 @@ impl BitSet {
     pub fn from_buf(buf: &[u8], offset: &mut usize, endian: MsgEndian) -> Result<BitSet, String> {
         let mut local_offset = *offset;
 
-        // number of bytes 
+        // number of bytes
         let size = usize::from_buf(buf, &mut local_offset, endian)?;
         if size > 32 {
             // 32 * 8 = 256
@@ -104,9 +104,83 @@ impl BitSet {
         Ok(BitSet { indices })
     }
 
+    pub fn from_field_paths(typ: Arc<PvaType>, field_paths: Vec<String>) -> Result<Self, String> {
+        let node_count = typ.num_nodes()?;
+        if node_count > 256 {
+            return Err(format!(
+                "PVA structure has {node_count} flattened field indices, exceeding the supported maximum of 256"
+            ));
+        }
+
+        let struct_type = match typ.as_ref() {
+            PvaType::Struct(struct_type) => struct_type,
+            _ => {
+                return Err("PVA BitSet field paths require a root structure type".to_string());
+            }
+        };
+
+        let mut indices = BTreeSet::new();
+        for field_path in field_paths {
+            let components: Vec<&str> = field_path.split('.').collect();
+            if components.iter().any(|component| component.is_empty()) {
+                return Err(format!(
+                    "Invalid empty component in PVA field path \"{field_path}\""
+                ));
+            }
+
+            let index = field_index_from_path(struct_type, &components, 0, &field_path)?;
+            indices.insert(index);
+        }
+
+        Ok(Self {
+            indices: indices.into_iter().collect(),
+        })
+    }
+
     pub fn indices(&self) -> &Vec<u8> {
         &self.indices
     }
+}
+
+fn field_index_from_path(
+    struct_type: &PvaStructType,
+    components: &[&str],
+    struct_index: usize,
+    field_path: &str,
+) -> Result<u8, String> {
+    let component = components[0];
+    let mut field_index = struct_index
+        .checked_add(1)
+        .ok_or_else(|| "PVA field index overflow".to_string())?;
+
+    for field in &struct_type.fields {
+        if field.name == component {
+            if components.len() == 1 {
+                return u8::try_from(field_index).map_err(|_| {
+                    format!(
+                        "PVA field path \"{field_path}\" exceeds the supported maximum field index of 255"
+                    )
+                });
+            }
+
+            return match field.typ.as_ref() {
+                PvaType::Struct(nested_type) => {
+                    field_index_from_path(nested_type, &components[1..], field_index, field_path)
+                }
+                _ => Err(format!(
+                    "Cannot resolve PVA field path \"{field_path}\": \"{component}\" is not a structure"
+                )),
+            };
+        }
+
+        field_index = field_index
+            .checked_add(field.typ.num_nodes()?)
+            .ok_or_else(|| "PVA field index overflow".to_string())?;
+    }
+
+    Err(format!(
+        "Cannot resolve PVA field path \"{field_path}\": field \"{component}\" does not exist"
+    ))
 }
 
 fn append_set_bits(mut value: u64, base_index: usize, indices: &mut Vec<u8>) -> Result<(), String> {
@@ -166,6 +240,77 @@ impl PvaType {
 }
 
 impl PvaValue {
+    /**
+     * Encode only the value fields selected by `bit_set`.
+     *
+     * This does not encode the BitSet itself. The caller must encode the BitSet
+     * immediately before the returned value data in a PVA partial-update payload.
+     */
+    pub fn to_buf_with_bitset(
+        &self,
+        typ: Arc<PvaType>,
+        bit_set: &BitSet,
+        buf: &mut Vec<u8>,
+        endian: MsgEndian,
+        registry: &mut PvaTypeRegistry,
+    ) -> Result<(), String> {
+        if !matches!(typ.as_ref(), PvaType::Struct(_)) {
+            return Err("PVA BitSet value encoding requires a root structure type".to_string());
+        }
+
+        validate_pva_value_type(self, typ.as_ref()).map_err(|error| {
+            format!("Cannot encode PVA BitSet value: value does not match its type: {error}")
+        })?;
+
+        let node_count = typ.num_nodes()?;
+        if node_count > 256 {
+            return Err(format!(
+                "PVA structure has {node_count} flattened field indices, exceeding the supported maximum of 256"
+            ));
+        }
+
+        let mut indices = bit_set.indices.clone();
+        indices.sort_unstable();
+        indices.dedup();
+
+        let mut encoded = Vec::new();
+        let mut bit_coverage = 0_usize;
+        for index in indices {
+            let index_usize = usize::from(index);
+            if index_usize < bit_coverage {
+                continue;
+            }
+
+            let field_type = typ.clone().type_at_index(index)?;
+            bit_coverage = index_usize
+                .checked_add(field_type.num_nodes()?)
+                .ok_or_else(|| "PVA BitSet coverage overflow".to_string())?;
+
+            let field_value = self.value_at_index(index)?;
+            field_value.to_buf(field_type, &mut encoded, endian, registry)?;
+        }
+
+        buf.extend_from_slice(&encoded);
+        Ok(())
+    }
+
+    fn value_at_index(&self, goal_index: u8) -> Result<&PvaValue, String> {
+        let PvaValue::Struct(struct_value) = self else {
+            return Err("PVA value lookup by BitSet index requires a root structure".to_string());
+        };
+
+        if goal_index == 0 {
+            return Ok(self);
+        }
+
+        let mut current_index = 1_usize;
+        struct_value
+            .value_at_index(usize::from(goal_index), &mut current_index)?
+            .ok_or_else(|| {
+                format!("PVA value index {goal_index} is not present in the root structure")
+            })
+    }
+
     pub fn set_value_at_index(
         &mut self,
         goal_index: u8,
@@ -300,6 +445,30 @@ impl PvaStructType {
 }
 
 impl PvaStructValue {
+    fn value_at_index(
+        &self,
+        goal_index: usize,
+        current_index: &mut usize,
+    ) -> Result<Option<&PvaValue>, String> {
+        for field_value in &self.fields {
+            if *current_index == goal_index {
+                return Ok(Some(field_value));
+            }
+
+            *current_index = current_index
+                .checked_add(1)
+                .ok_or_else(|| "PVA value field index overflow".to_string())?;
+
+            if let PvaValue::Struct(struct_value) = field_value
+                && let Some(found) = struct_value.value_at_index(goal_index, current_index)?
+            {
+                return Ok(Some(found));
+            }
+        }
+
+        Ok(None)
+    }
+
     fn set_value_at_index(
         &mut self,
         goal_index: u8,
@@ -345,6 +514,198 @@ mod tests {
         value::PvaValue,
     };
     use std::sync::Arc;
+
+    fn field_path_type() -> Arc<PvaType> {
+        Arc::new(PvaType::Struct(Arc::new(PvaStructType {
+            id: "root_t".to_string(),
+            fields: vec![
+                Arc::new(PvaFieldType {
+                    name: "value".to_string(),
+                    typ: Arc::new(PvaType::Double),
+                }),
+                Arc::new(PvaFieldType {
+                    name: "alarm".to_string(),
+                    typ: Arc::new(PvaType::Struct(Arc::new(PvaStructType {
+                        id: "alarm_t".to_string(),
+                        fields: vec![
+                            Arc::new(PvaFieldType {
+                                name: "severity".to_string(),
+                                typ: Arc::new(PvaType::Int),
+                            }),
+                            Arc::new(PvaFieldType {
+                                name: "message".to_string(),
+                                typ: Arc::new(PvaType::String),
+                            }),
+                        ],
+                    }))),
+                }),
+                Arc::new(PvaFieldType {
+                    name: "timeStamp".to_string(),
+                    typ: Arc::new(PvaType::Struct(Arc::new(PvaStructType {
+                        id: "time_t".to_string(),
+                        fields: vec![
+                            Arc::new(PvaFieldType {
+                                name: "seconds".to_string(),
+                                typ: Arc::new(PvaType::Long),
+                            }),
+                            Arc::new(PvaFieldType {
+                                name: "nanoSeconds".to_string(),
+                                typ: Arc::new(PvaType::Int),
+                            }),
+                        ],
+                    }))),
+                }),
+                Arc::new(PvaFieldType {
+                    name: "waveform".to_string(),
+                    typ: Arc::new(PvaType::DoubleVarSizeArray),
+                }),
+            ],
+        })))
+    }
+
+    fn field_path_value() -> PvaValue {
+        PvaValue::Struct(PvaStructValue {
+            fields: vec![
+                PvaValue::Double(1.5),
+                PvaValue::Struct(PvaStructValue {
+                    fields: vec![PvaValue::Int(2), PvaValue::String("warn".to_string())],
+                }),
+                PvaValue::Struct(PvaStructValue {
+                    fields: vec![PvaValue::Long(100), PvaValue::Int(200)],
+                }),
+                PvaValue::DoubleVarSizeArray(vec![3.0, 4.0]),
+            ],
+        })
+    }
+
+    #[test]
+    fn builds_bitset_from_nested_field_paths() {
+        let bit_set = BitSet::from_field_paths(
+            field_path_type(),
+            vec![
+                "waveform".to_string(),
+                "alarm.severity".to_string(),
+                "value".to_string(),
+                "timeStamp.nanoSeconds".to_string(),
+                "value".to_string(),
+            ],
+        )
+        .unwrap();
+
+        // root=0, value=1, alarm=2, severity=3, message=4,
+        // timeStamp=5, seconds=6, nanoSeconds=7, waveform=8.
+        assert_eq!(bit_set.indices, vec![1, 3, 7, 8]);
+    }
+
+    #[test]
+    fn rejects_invalid_field_paths() {
+        let typ = field_path_type();
+
+        assert!(BitSet::from_field_paths(typ.clone(), vec!["alarm.missing".to_string()]).is_err());
+        assert!(BitSet::from_field_paths(typ.clone(), vec!["value.child".to_string()]).is_err());
+        assert!(BitSet::from_field_paths(typ, vec!["alarm..severity".to_string()]).is_err());
+        assert!(
+            BitSet::from_field_paths(Arc::new(PvaType::Int), vec!["value".to_string()]).is_err()
+        );
+    }
+
+    #[test]
+    fn encodes_only_fields_selected_by_bitset() {
+        let typ = field_path_type();
+        let value = field_path_value();
+        let bit_set = BitSet::from_field_paths(
+            typ.clone(),
+            vec![
+                "value".to_string(),
+                "alarm.severity".to_string(),
+                "waveform".to_string(),
+            ],
+        )
+        .unwrap();
+        let mut buf = Vec::new();
+
+        value
+            .to_buf_with_bitset(
+                typ,
+                &bit_set,
+                &mut buf,
+                MsgEndian::Little,
+                &mut PvaTypeRegistry::new(),
+            )
+            .unwrap();
+
+        let mut expected = Vec::new();
+        expected.extend_from_slice(&1.5_f64.to_le_bytes());
+        expected.extend_from_slice(&2_i32.to_le_bytes());
+        expected.push(2);
+        expected.extend_from_slice(&3.0_f64.to_le_bytes());
+        expected.extend_from_slice(&4.0_f64.to_le_bytes());
+        assert_eq!(buf, expected);
+    }
+
+    #[test]
+    fn selected_structure_covers_selected_descendants_when_encoding() {
+        let typ = field_path_type();
+        let value = field_path_value();
+        let bit_set = BitSet::from_field_paths(
+            typ.clone(),
+            vec![
+                "alarm".to_string(),
+                "alarm.severity".to_string(),
+                "timeStamp.nanoSeconds".to_string(),
+            ],
+        )
+        .unwrap();
+        let mut buf = Vec::new();
+
+        value
+            .to_buf_with_bitset(
+                typ,
+                &bit_set,
+                &mut buf,
+                MsgEndian::Little,
+                &mut PvaTypeRegistry::new(),
+            )
+            .unwrap();
+
+        let mut expected = Vec::new();
+        expected.extend_from_slice(&2_i32.to_le_bytes());
+        expected.push(4);
+        expected.extend_from_slice(b"warn");
+        expected.extend_from_slice(&200_i32.to_le_bytes());
+        assert_eq!(buf, expected);
+    }
+
+    #[test]
+    fn root_bit_encodes_complete_structure_once() {
+        let typ = field_path_type();
+        let value = field_path_value();
+        let bit_set = BitSet {
+            indices: vec![0, 1, 3, 8],
+        };
+        let mut partial_buf = Vec::new();
+        let mut full_buf = Vec::new();
+
+        value
+            .to_buf_with_bitset(
+                typ.clone(),
+                &bit_set,
+                &mut partial_buf,
+                MsgEndian::Little,
+                &mut PvaTypeRegistry::new(),
+            )
+            .unwrap();
+        value
+            .to_buf(
+                typ,
+                &mut full_buf,
+                MsgEndian::Little,
+                &mut PvaTypeRegistry::new(),
+            )
+            .unwrap();
+
+        assert_eq!(partial_buf, full_buf);
+    }
 
     #[test]
     fn decodes_partial_bitset_word() {
