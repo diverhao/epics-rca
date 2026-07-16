@@ -1,7 +1,7 @@
 use std::sync::Arc;
 
 use crate::pva_message::{
-    complex::{PvaFieldType, PvaStructType, PvaStructValue, validate_pva_field_name},
+    complex::{validate_pva_field_name, PvaFieldType, PvaStructType, PvaStructValue},
     typ::PvaType,
     value::PvaValue,
 };
@@ -43,6 +43,54 @@ impl PvRequestNode {
 /// siblings, and recursively grouped children with `{...}`.
 pub fn parse_pv_request(input: &str) -> Result<PvRequestNode, String> {
     PvRequestParser::new(input).parse()
+}
+
+/// Build the `pvRequest` tree used to initialize a channel PUT_GET request.
+///
+/// Each input uses the same field-selection syntax as [`parse_pv_request`],
+/// while the returned root contains the protocol-defined `putField` and
+/// `getField` branches.
+pub fn parse_put_get_pv_request(
+    put_selection: &str,
+    get_selection: &str,
+) -> Result<PvRequestNode, String> {
+    let put_children = parse_selection_children(put_selection)?;
+    let get_children = parse_selection_children(get_selection)?;
+
+    Ok(PvRequestNode::new(
+        "",
+        vec![
+            PvRequestNode::new("putField", put_children),
+            PvRequestNode::new("getField", get_children),
+        ],
+    ))
+}
+
+fn parse_selection_children(input: &str) -> Result<Vec<PvRequestNode>, String> {
+    let root = parse_pv_request(input)?;
+    let mut root_children = root.children;
+
+    if root_children.is_empty() {
+        return Ok(vec![]);
+    }
+
+    if root_children.len() != 1 {
+        return Err(String::from(
+            "A field-selection pvRequest must contain exactly one field branch",
+        ));
+    }
+
+    let field = root_children
+        .pop()
+        .ok_or_else(|| String::from("Missing field-selection pvRequest branch"))?;
+    if field.name != "field" {
+        return Err(format!(
+            "Expected field-selection pvRequest branch, got \"{}\"",
+            field.name
+        ));
+    }
+
+    Ok(field.children)
 }
 
 // ----------------------- PV Request Parser ----------------
@@ -262,5 +310,65 @@ impl PvaValue {
         }
 
         PvaValue::Struct(struct_value)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{parse_put_get_pv_request, PvRequestNode};
+
+    #[test]
+    fn composes_put_get_field_selections() {
+        let actual = parse_put_get_pv_request("value", "value,alarm,timeStamp").unwrap();
+        let expected = PvRequestNode::new(
+            "",
+            vec![
+                PvRequestNode::new("putField", vec![PvRequestNode::new("value", vec![])]),
+                PvRequestNode::new(
+                    "getField",
+                    vec![
+                        PvRequestNode::new("value", vec![]),
+                        PvRequestNode::new("alarm", vec![]),
+                        PvRequestNode::new("timeStamp", vec![]),
+                    ],
+                ),
+            ],
+        );
+
+        assert_eq!(actual, expected);
+    }
+
+    #[test]
+    fn composes_explicit_field_wrappers() {
+        let actual = parse_put_get_pv_request("field(value)", "field(alarm.severity)").unwrap();
+        let expected = PvRequestNode::new(
+            "",
+            vec![
+                PvRequestNode::new("putField", vec![PvRequestNode::new("value", vec![])]),
+                PvRequestNode::new(
+                    "getField",
+                    vec![PvRequestNode::new(
+                        "alarm",
+                        vec![PvRequestNode::new("severity", vec![])],
+                    )],
+                ),
+            ],
+        );
+
+        assert_eq!(actual, expected);
+    }
+
+    #[test]
+    fn composes_empty_put_get_selections() {
+        let actual = parse_put_get_pv_request("", "").unwrap();
+        let expected = PvRequestNode::new(
+            "",
+            vec![
+                PvRequestNode::new("putField", vec![]),
+                PvRequestNode::new("getField", vec![]),
+            ],
+        );
+
+        assert_eq!(actual, expected);
     }
 }

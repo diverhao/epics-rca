@@ -5,7 +5,7 @@ use std::sync::Arc;
 use crate::ca_message::message::{MAX_UDP_SEND, current_hostname_bytes};
 use crate::pva_message::bit_set::BitSet;
 use crate::pva_message::complex::{PvaFieldType, PvaStructType, PvaStructValue};
-use crate::pva_message::pv_request::parse_pv_request;
+use crate::pva_message::pv_request::{parse_put_get_pv_request, parse_pv_request};
 use crate::pva_message::typ::PvaType;
 use crate::pva_message::type_registry::PvaTypeRegistry;
 use crate::pva_message::value::PvaValue;
@@ -603,7 +603,7 @@ pub fn build_put(
     value: PvaValue,
     pva_type_registry: &mut PvaTypeRegistry,
     endian: MsgEndian,
-    destroy_put: bool,
+    destroy_upon_finish: bool,
 ) -> Result<Vec<u8>, String> {
     // struct channelPutRequest {
     //     int serverChannelID;
@@ -621,7 +621,7 @@ pub fn build_put(
     ioid.to_buf(&PvaType::Int, &mut buf, endian)?;
 
     // 0x00
-    if destroy_put {
+    if destroy_upon_finish {
         (0x10 as i8).to_buf(&PvaType::Byte, &mut buf, endian)?;
     } else {
         (0x00 as i8).to_buf(&PvaType::Byte, &mut buf, endian)?;
@@ -634,4 +634,183 @@ pub fn build_put(
     value.to_buf_with_bitset(typ, &bit_set, &mut buf, endian, pva_type_registry)?;
 
     PvaMsg::new(MsgSeg::NotSeg, MsgSrc::Client, endian, PvaCmd::Put, buf)?.to_buf()
+}
+
+// GET the value from a PUT channle
+pub fn build_get_from_put(
+    sid: i32,
+    ioid: i32,
+    endian: MsgEndian,
+    destroy_upon_finish: bool,
+) -> Result<Vec<u8>, String> {
+    let mut buf: Vec<u8> = vec![];
+    // struct channelGetPutRequest {
+    //     int serverChannelID;
+    //     int requestID;
+    //     byte subcommand = 0x40;
+    // };
+
+    // sid
+    sid.to_buf(&PvaType::Int, &mut buf, endian)?;
+
+    // ioid
+    ioid.to_buf(&PvaType::Int, &mut buf, endian)?;
+
+    // 0x40 and 0x10
+    if destroy_upon_finish {
+        (0x50 as u8).to_buf(&PvaType::UByte, &mut buf, endian)?;
+    } else {
+        (0x40 as u8).to_buf(&PvaType::UByte, &mut buf, endian)?;
+    }
+
+    PvaMsg::new(MsgSeg::NotSeg, MsgSrc::Client, endian, PvaCmd::Put, buf)?.to_buf()
+}
+
+// put then get
+// practically the same as build_put()
+pub fn build_put_get_init(
+    sid: i32,
+    ioid: i32,
+    put_pv_request_str: String,
+    get_pv_request_str: String,
+    endian: MsgEndian,
+    pva_type_registry: &mut PvaTypeRegistry,
+) -> Result<Vec<u8>, String> {
+    let mut buf: Vec<u8> = vec![];
+
+    // struct channelPutGetRequestInit {
+    //     int serverChannelID;
+    //     int requestID;
+    //     byte subcommand = 0x08;
+    //     FieldDesc pvRequestIF;
+    //     PVField pvRequest;
+    // };
+
+    // sid
+    sid.to_buf(&PvaType::Int, &mut buf, endian)?;
+
+    // ioid
+    ioid.to_buf(&PvaType::Int, &mut buf, endian)?;
+
+    // 0x08
+    (0x08 as u8).to_buf(&PvaType::UByte, &mut buf, endian)?;
+
+    // pv request type
+    let pv_request_node = parse_put_get_pv_request(&put_pv_request_str, &get_pv_request_str)?;
+    let pv_request_type = PvaType::build_pv_request(&pv_request_node);
+    pv_request_type.to_buf(&mut buf, endian, pva_type_registry)?;
+
+    // pv request value
+    let pv_request_value = PvaValue::build_pv_request(&pv_request_node);
+    pv_request_value.to_buf(
+        Arc::new(pv_request_type),
+        &mut buf,
+        endian,
+        pva_type_registry,
+    )?;
+
+    // message with header
+    PvaMsg::new(MsgSeg::NotSeg, MsgSrc::Client, endian, PvaCmd::PutGet, buf)?.to_buf()
+}
+
+pub fn build_put_get(
+    sid: i32,
+    ioid: i32,
+    typ: Arc<PvaType>,
+    field_paths: Vec<String>,
+    value: PvaValue,
+    pva_type_registry: &mut PvaTypeRegistry,
+    endian: MsgEndian,
+    destroy_upon_finish: bool,
+) -> Result<Vec<u8>, String> {
+    // struct channelPutGetRequest {
+    //     int serverChannelID;
+    //     int requestID;
+    //     byte subcommand = 0x00 for PUT_GET; 0x10 mask for DESTROY;
+    //     BitSet toPutBitSet;
+    //     PVField pvPutStructureData;
+    // };
+
+    let mut buf: Vec<u8> = vec![];
+
+    // sid
+    sid.to_buf(&PvaType::Int, &mut buf, endian)?;
+
+    // ioid
+    ioid.to_buf(&PvaType::Int, &mut buf, endian)?;
+
+    // 0x00
+    if destroy_upon_finish {
+        (0x10 as i8).to_buf(&PvaType::Byte, &mut buf, endian)?;
+    } else {
+        (0x00 as i8).to_buf(&PvaType::Byte, &mut buf, endian)?;
+    }
+    // bitset
+    let bit_set = BitSet::from_field_paths(Arc::clone(&typ), field_paths)?;
+    bit_set.to_buf(&mut buf, endian)?;
+
+    //  partial data
+    value.to_buf_with_bitset(typ, &bit_set, &mut buf, endian, pva_type_registry)?;
+
+    PvaMsg::new(MsgSeg::NotSeg, MsgSrc::Client, endian, PvaCmd::PutGet, buf)?.to_buf()
+}
+
+// GET the value of pvPutStructureIF type from an existing PUT_GET channel
+pub fn build_get_put_from_put_get(
+    sid: i32,
+    ioid: i32,
+    endian: MsgEndian,
+    destroy_upon_finish: bool,
+) -> Result<Vec<u8>, String> {
+    let mut buf: Vec<u8> = vec![];
+    // struct channelGetPutRequest {
+    //     int serverChannelID;
+    //     int requestID;
+    //     byte subcommand = 0x80;
+    // };
+
+    // sid
+    sid.to_buf(&PvaType::Int, &mut buf, endian)?;
+
+    // ioid
+    ioid.to_buf(&PvaType::Int, &mut buf, endian)?;
+
+    // 0x80
+    if destroy_upon_finish {
+        (0x90 as u8).to_buf(&PvaType::UByte, &mut buf, endian)?;
+    } else {
+        (0x80 as u8).to_buf(&PvaType::UByte, &mut buf, endian)?;
+    }
+
+    PvaMsg::new(MsgSeg::NotSeg, MsgSrc::Client, endian, PvaCmd::PutGet, buf)?.to_buf()
+}
+
+// GET the value of pvGetStructureIF type from an existing PUT_GET channel
+pub fn build_get_get_from_put_get(
+    sid: i32,
+    ioid: i32,
+    endian: MsgEndian,
+    destroy_upon_finish: bool,
+) -> Result<Vec<u8>, String> {
+    let mut buf: Vec<u8> = vec![];
+    // struct channelGetPutRequest {
+    //     int serverChannelID;
+    //     int requestID;
+    //     byte subcommand = 0x40;
+    // };
+
+    // sid
+    sid.to_buf(&PvaType::Int, &mut buf, endian)?;
+
+    // ioid
+    ioid.to_buf(&PvaType::Int, &mut buf, endian)?;
+
+    // 0x40
+    if destroy_upon_finish {
+        (0x50 as u8).to_buf(&PvaType::UByte, &mut buf, endian)?;
+    } else {
+        (0x40 as u8).to_buf(&PvaType::UByte, &mut buf, endian)?;
+    }
+
+    PvaMsg::new(MsgSeg::NotSeg, MsgSrc::Client, endian, PvaCmd::PutGet, buf)?.to_buf()
 }
