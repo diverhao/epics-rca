@@ -814,3 +814,336 @@ pub fn build_get_get_from_put_get(
 
     PvaMsg::new(MsgSeg::NotSeg, MsgSrc::Client, endian, PvaCmd::PutGet, buf)?.to_buf()
 }
+
+pub fn build_monitor_init(
+    sid: i32,
+    ioid: i32,
+    endian: MsgEndian,
+    pv_request_str: String,
+    pva_type_registry: &mut PvaTypeRegistry,
+) -> Result<Vec<u8>, String> {
+    let mut buf: Vec<u8> = vec![];
+
+    // sid
+    sid.to_buf(&PvaType::Int, &mut buf, endian)?;
+
+    // ioid
+    ioid.to_buf(&PvaType::Int, &mut buf, endian)?;
+
+    // 0x08
+    (0x08_u8).to_buf(&PvaType::UByte, &mut buf, endian)?;
+
+    // pv request type
+    let pv_request_node = parse_pv_request(&pv_request_str)?;
+    let pv_request_type = PvaType::build_pv_request(&pv_request_node);
+    pv_request_type.to_buf(&mut buf, endian, pva_type_registry)?;
+
+    // pv request value
+    let pv_request_value = PvaValue::build_pv_request(&pv_request_node);
+    pv_request_value.to_buf(
+        Arc::new(pv_request_type),
+        &mut buf,
+        endian,
+        pva_type_registry,
+    )?;
+
+    PvaMsg::new(MsgSeg::NotSeg, MsgSrc::Client, endian, PvaCmd::Monitor, buf)?.to_buf()
+}
+
+pub fn build_monitor_start(sid: i32, ioid: i32, endian: MsgEndian) -> Result<Vec<u8>, String> {
+    let mut buf: Vec<u8> = vec![];
+
+    // sid
+    sid.to_buf(&PvaType::Int, &mut buf, endian)?;
+
+    // ioid
+    ioid.to_buf(&PvaType::Int, &mut buf, endian)?;
+
+    // 0x44
+    (0x44_u8).to_buf(&PvaType::UByte, &mut buf, endian)?;
+
+    PvaMsg::new(MsgSeg::NotSeg, MsgSrc::Client, endian, PvaCmd::Monitor, buf)?.to_buf()
+}
+
+pub fn build_monitor_stop(
+    sid: i32,
+    ioid: i32,
+    endian: MsgEndian,
+    destroy: bool,
+) -> Result<Vec<u8>, String> {
+    let mut buf: Vec<u8> = vec![];
+
+    // sid
+    sid.to_buf(&PvaType::Int, &mut buf, endian)?;
+
+    // ioid
+    ioid.to_buf(&PvaType::Int, &mut buf, endian)?;
+
+    // 0x04
+    if destroy {
+        (0x14_u8).to_buf(&PvaType::UByte, &mut buf, endian)?;
+    } else {
+        (0x04_u8).to_buf(&PvaType::UByte, &mut buf, endian)?;
+    }
+
+    PvaMsg::new(MsgSeg::NotSeg, MsgSrc::Client, endian, PvaCmd::Monitor, buf)?.to_buf()
+}
+
+pub fn build_destroy_request(sid: i32, ioid: i32, endian: MsgEndian) -> Result<Vec<u8>, String> {
+    let mut buf: Vec<u8> = vec![];
+    // struct destroyRequest {
+    //     int serverChannelID;
+    //     int requestID;
+    // };
+
+    // sid
+    sid.to_buf(&PvaType::Int, &mut buf, endian)?;
+
+    // ioid
+    ioid.to_buf(&PvaType::Int, &mut buf, endian)?;
+
+    PvaMsg::new(
+        MsgSeg::NotSeg,
+        MsgSrc::Client,
+        endian,
+        PvaCmd::DestroyRequest,
+        buf,
+    )?
+    .to_buf()
+}
+
+// todo: CMD_ARRAY (0x0E)
+
+pub fn build_process_init(
+    sid: i32,
+    ioid: i32,
+    endian: MsgEndian,
+    pv_request_str: String,
+    pva_type_registry: &mut PvaTypeRegistry,
+) -> Result<Vec<u8>, String> {
+    let mut buf: Vec<u8> = vec![];
+
+    // struct channelProcessRequestInit {
+    //     int serverChannelID;
+    //     int requestID;
+    //     byte subcommand = 0x08;
+    //     FieldDesc pvRequestIF;
+    //     [if serverStatusIF != NULL_TYPE_CODE] PVField pvRequest;
+    // };
+
+    // sid
+    sid.to_buf(&PvaType::Int, &mut buf, endian)?;
+
+    // ioid
+    ioid.to_buf(&PvaType::Int, &mut buf, endian)?;
+
+    // 0x08
+    (0x08_u8).to_buf(&PvaType::UByte, &mut buf, endian)?;
+
+    // pv request type
+    let pv_request_node = parse_pv_request(&pv_request_str)?;
+    let pv_request_type = PvaType::build_pv_request(&pv_request_node);
+    pv_request_type.to_buf(&mut buf, endian, pva_type_registry)?;
+
+    // pv request value
+    let pv_request_value = PvaValue::build_pv_request(&pv_request_node);
+    pv_request_value.to_buf(
+        Arc::new(pv_request_type),
+        &mut buf,
+        endian,
+        pva_type_registry,
+    )?;
+
+    PvaMsg::new(MsgSeg::NotSeg, MsgSrc::Client, endian, PvaCmd::Process, buf)?.to_buf()
+}
+
+pub fn build_process(
+    sid: i32,
+    ioid: i32,
+    endian: MsgEndian,
+    destroy_upon_finish: bool,
+) -> Result<Vec<u8>, String> {
+    let mut buf: Vec<u8> = vec![];
+
+    // struct channelProcessRequest {
+    //     int serverChannelID;
+    //     int requestID;
+    //     byte subcommand = 0x00 mask for PROCESS; 0x10 mask for DESTROY;
+    // };
+
+    // sid
+    sid.to_buf(&PvaType::Int, &mut buf, endian)?;
+
+    // ioid
+    ioid.to_buf(&PvaType::Int, &mut buf, endian)?;
+
+    // 0x00
+    if destroy_upon_finish {
+        (0x10_u8).to_buf(&PvaType::UByte, &mut buf, endian)?;
+    } else {
+        (0x00_u8).to_buf(&PvaType::UByte, &mut buf, endian)?;
+    }
+
+    PvaMsg::new(MsgSeg::NotSeg, MsgSrc::Client, endian, PvaCmd::Process, buf)?.to_buf()
+}
+
+pub fn build_get_field(
+    sid: i32,
+    ioid: i32,
+    endian: MsgEndian,
+    sub_field_name: String,
+) -> Result<Vec<u8>, String> {
+    let mut buf: Vec<u8> = vec![];
+    // struct channelGetFieldRequest {
+    //     int serverChannelID;
+    //     int requestID;
+    //     string subFieldName;  // entire record if empty
+    // };
+
+    // sid
+    sid.to_buf(&PvaType::Int, &mut buf, endian)?;
+
+    // ioid
+    ioid.to_buf(&PvaType::Int, &mut buf, endian)?;
+
+    // sub field name
+    sub_field_name.to_buf(&PvaType::String, &mut buf, endian)?;
+
+    PvaMsg::new(
+        MsgSeg::NotSeg,
+        MsgSrc::Client,
+        endian,
+        PvaCmd::GetField,
+        buf,
+    )?
+    .to_buf()
+}
+
+// only server to client: CMD_MESSAGE (0x12)
+
+// depracated: CMD_MULTIPLE_DATA (0x13)
+
+pub fn build_rpc_init(
+    sid: i32,
+    ioid: i32,
+    endian: MsgEndian,
+    pva_type_registry: &mut PvaTypeRegistry,
+) -> Result<Vec<u8>, String> {
+    let mut buf: Vec<u8> = vec![];
+
+    // struct channelRPCRequestInit {
+    //     int serverChannelID;
+    //     int requestID;
+    //     byte subcommand = 0x08;
+    //     FieldDesc pvRequestIF;
+    //     PVField pvRequest;
+    // };
+
+    // sid
+    sid.to_buf(&PvaType::Int, &mut buf, endian)?;
+
+    // ioid
+    ioid.to_buf(&PvaType::Int, &mut buf, endian)?;
+
+    // 0x08
+    (0x08_i8).to_buf(&PvaType::Byte, &mut buf, endian)?;
+
+    // pv request type
+    let pv_request_str = String::from(""); // empty is enough
+    let pv_request_node = parse_pv_request(&pv_request_str)?;
+    let pv_request_type = PvaType::build_pv_request(&pv_request_node);
+    pv_request_type.to_buf(&mut buf, endian, pva_type_registry)?;
+
+    // pv request value
+    let pv_request_value = PvaValue::build_pv_request(&pv_request_node);
+    pv_request_value.to_buf(
+        Arc::new(pv_request_type),
+        &mut buf,
+        endian,
+        pva_type_registry,
+    )?;
+
+    PvaMsg::new(MsgSeg::NotSeg, MsgSrc::Client, endian, PvaCmd::Rpc, buf)?.to_buf()
+}
+
+pub fn build_rpc(
+    sid: i32,
+    ioid: i32,
+    endian: MsgEndian,
+    pva_type_registry: &mut PvaTypeRegistry,
+    input_type: PvaType,
+    input_value: PvaValue,
+    destroy_upon_finish: bool,
+) -> Result<Vec<u8>, String> {
+    if let PvaType::Struct(_) = input_type {
+    } else {
+        return Err("RPC input argument type must be PvaType::Struct".to_string());
+    }
+
+    let mut buf: Vec<u8> = vec![];
+
+    // struct channelRPCRequest {
+    //     int serverChannelID;
+    //     int requestID;
+    //     byte subcommand = 0x00 mask for RPC; 0x10 mask for DESTROY;
+    //     FieldDesc pvStructureIF;
+    //     PVField pvStructureData;
+    // };
+
+    // sid
+    sid.to_buf(&PvaType::Int, &mut buf, endian)?;
+
+    // ioid
+    ioid.to_buf(&PvaType::Int, &mut buf, endian)?;
+
+    // 0x00
+    if destroy_upon_finish {
+        (0x10_i8).to_buf(&PvaType::Byte, &mut buf, endian)?;
+    } else {
+        (0x00_i8).to_buf(&PvaType::Byte, &mut buf, endian)?;
+    }
+
+    // input argument's type
+    input_type.to_buf(&mut buf, endian, pva_type_registry)?;
+
+    // input argument's value
+    input_value.to_buf(Arc::new(input_type), &mut buf, endian, pva_type_registry)?;
+
+    PvaMsg::new(MsgSeg::NotSeg, MsgSrc::Client, endian, PvaCmd::Rpc, buf)?.to_buf()
+}
+
+pub fn build_cancel_request(sid: i32, ioid: i32, endian: MsgEndian) -> Result<Vec<u8>, String> {
+    let mut buf: Vec<u8> = vec![];
+    // struct cancelRequest {
+    //     int serverChannelID;
+    //     int requestID;
+    // };
+
+    // sid
+    sid.to_buf(&PvaType::Int, &mut buf, endian)?;
+
+    // ioid
+    ioid.to_buf(&PvaType::Int, &mut buf, endian)?;
+
+    PvaMsg::new(
+        MsgSeg::NotSeg,
+        MsgSrc::Client,
+        endian,
+        PvaCmd::CancelRequest,
+        buf,
+    )?
+    .to_buf()
+}
+
+// CMD_ORIGIN_TAG (0x16), not implement in epics-rca
+
+
+// Mark Total Byte Sent (0x00), not used
+
+// Acknowledge Total Bytes Received (0x01), not used
+
+// Set byte order (0x02), from server to client
+
+// Echo request (0x03)
+
+// Echo response (0x04)
