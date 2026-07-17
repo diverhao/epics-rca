@@ -9,3 +9,4 @@ pub mod value;
 pub mod value_validation;
 pub mod bit_set;
 pub mod pv_request;
+pub mod message_handler;
