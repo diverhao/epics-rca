@@ -1,38 +1,45 @@
 use crate::{
-    ca_message::cmd::CaCmd,
-    pva_message::{cmd::PvaCmd, header::MsgEndian, message::PvaMsg, typ::PvaType, value::PvaValue},
+    ca_channel::dbr::ChannelState,
+    context::context::get_context,
+    pva_message::{
+        cmd::PvaCmd, message::PvaMsg, typ::PvaType, type_registry::PvaTypeRegistry, value::PvaValue,
+    },
 };
-use log::debug;
-use std::net::{IpAddr, Ipv4Addr};
+use log::{debug, error, warn};
 use std::{
-    fmt::Error,
-    net::{Ipv6Addr, SocketAddr},
+    net::{IpAddr, Ipv6Addr, SocketAddr},
     sync::Arc,
 };
 
 /**
  * Handle Channel Access messages
  */
-pub fn handle_udp_msgs(src: &SocketAddr, msgs: Vec<PvaMsg>) {
+pub fn handle_udp_pva_msgs(src: &SocketAddr, msgs: Vec<PvaMsg>) {
     for msg in msgs {
-        handle_udp_msg(src, msg);
+        handle_udp_pva_msg(src, msg);
     }
 }
 
-pub fn handle_tcp_msgs(src: &SocketAddr, msgs: Vec<PvaMsg>) -> bool {
+pub fn handle_tcp_pva_msgs(src: &SocketAddr, msgs: Vec<PvaMsg>) -> bool {
     for msg in msgs {
-        if handle_tcp_msg(src, msg) {
+        if handle_tcp_pva_msg(src, msg) {
             return false;
         }
     }
     true
 }
 
-pub fn handle_udp_msg(src: &SocketAddr, msg: PvaMsg) {
+pub fn handle_udp_pva_msg(src: &SocketAddr, msg: PvaMsg) {
     let cmd = msg.header().cmd();
+    // dummy registry
+    let mut pva_type_registry = PvaTypeRegistry::new();
     debug!("\nReceived from {src}: {msg}");
     match cmd {
-        PvaCmd::SearchResponse => {}
+        PvaCmd::SearchResponse => {
+            if let Err(err) = handle_search_response(msg, src, &mut pva_type_registry) {
+                error!("Failed to handle PVA search response from {src}: {err}");
+            }
+        }
         _ => {}
     }
 }
@@ -40,8 +47,7 @@ pub fn handle_udp_msg(src: &SocketAddr, msg: PvaMsg) {
 pub fn handle_search_response(
     msg: PvaMsg,
     src: &SocketAddr,
-    endian: MsgEndian,
-    pva_type_registry: &mut super::type_registry::PvaTypeRegistry,
+    pva_type_registry: &mut PvaTypeRegistry,
 ) -> Result<(), String> {
     // struct searchResponse {
     //     byte[12] guid;
@@ -52,6 +58,8 @@ pub fn handle_search_response(
     //     boolean found;
     //     int[] searchInstanceIDs;
     // };
+
+    let endian = msg.header().flags().endian;
 
     // skip guid
     let mut offset = 0;
@@ -94,7 +102,7 @@ pub fn handle_search_response(
     };
 
     // the tcp address and port for this channel
-    let tcp_socket_addr = decode_pva_socket_addr(ip, port, src.ip());
+    let server_addr = decode_pva_socket_addr(ip, port, src.ip());
 
     // protocol
     let protocol = match PvaValue::from_buf(
@@ -109,26 +117,89 @@ pub fn handle_search_response(
     };
 
     // found
-    let found = match PvaValue::from_buf(Arc::new(PvaType::Boolean), buf, &mut offset, endian, pva_type_registry)? {
+    let found = match PvaValue::from_buf(
+        Arc::new(PvaType::Boolean),
+        buf,
+        &mut offset,
+        endian,
+        pva_type_registry,
+    )? {
         PvaValue::Boolean(found) => found,
-        _ => return Err("".to_string())
+        _ => return Err("".to_string()),
     };
 
     // cids
     let mut cids: Vec<u32> = vec![];
-    let count = match PvaValue::from_buf(Arc::new(PvaType::UShort), buf, &mut offset, endian, pva_type_registry)? {
+    let count = match PvaValue::from_buf(
+        Arc::new(PvaType::UShort),
+        buf,
+        &mut offset,
+        endian,
+        pva_type_registry,
+    )? {
         PvaValue::UShort(count) => count,
-        _ => return Err("".to_string())
+        _ => return Err("".to_string()),
     };
     for ii in 0..count {
-        let cid = match PvaValue::from_buf(Arc::new(PvaType::UInt), buf, &mut offset, endian, pva_type_registry)? {
+        let cid = match PvaValue::from_buf(
+            Arc::new(PvaType::UInt),
+            buf,
+            &mut offset,
+            endian,
+            pva_type_registry,
+        )? {
             PvaValue::UInt(cid) => cid,
-            _ => return Err("".to_string())
+            _ => return Err("".to_string()),
         };
         cids.push(cid);
     }
 
+    if found == false && protocol == "tcp" {
+        return Err("Not found".to_string());
+    }
 
+    // update channel from above info
+    for cid in cids {
+        let context = get_context();
+        let channels = context.pva_channels();
+
+        // find the channel
+        let channel = match channels.channel_by_cid(cid) {
+            Some(channel) => channel,
+            None => continue, // channel not found
+        };
+
+        let state = channel.state();
+        if state != ChannelState::NameSearching {
+            // duplicated search success message from server
+            warn!(
+                "Channel must be at NeverConnected or NameSearching state for CA_PROTO_SEARCH, but now is {:?}",
+                state
+            );
+            continue;
+        }
+
+        // update state and move channel from searching list to not_searching list
+        channel.set_state(ChannelState::NameFound, true);
+
+        // connect TCP (if not connected yet), and send handshake packets
+        if let Some(tcp) = context.tcps().tcp(&server_addr) {
+            // channel.connect_with_existing_tcp(tcp, server_addr);
+            channel.set_state(ChannelState::TcpConnected, true);
+            // add this channel to TCP
+            let cid = channel.cid();
+            tcp.add_cid(cid);
+            // assign TCP to this channel
+            channel.set_addr(Some(server_addr));
+            // todo: send handshake messages
+            channel.send_connect_chan();
+        } else {
+            // todo: try to connect tcp if not connected
+            tokio::spawn(async move {
+                channel.connect(server_addr).await;
+            });
+        }
+    }
 
     Ok(())
 }
@@ -150,7 +221,7 @@ fn decode_pva_socket_addr(address: &[u8; 16], port: u16, source_ip: IpAddr) -> S
     SocketAddr::new(ip, port)
 }
 
-pub fn handle_tcp_msg(src: &SocketAddr, msg: PvaMsg) -> bool {
+pub fn handle_tcp_pva_msg(src: &SocketAddr, msg: PvaMsg) -> bool {
     let cmd = msg.header().cmd();
     debug!("\nReceived from {src}: {msg}");
     match cmd {

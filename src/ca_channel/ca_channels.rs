@@ -369,7 +369,7 @@ impl CaChannels {
 
         for buf_packet in buf {
             if buf_packet.len() > 16 {
-                udp.send_buf(&buf_packet).await;
+                udp.send_buf(&buf_packet, false).await;
             }
         }
 

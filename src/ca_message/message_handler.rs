@@ -19,13 +19,13 @@ use std::sync::{Arc, RwLock, RwLockReadGuard, RwLockWriteGuard};
 /**
  * Handle Channel Access messages
  */
-pub fn handle_udp_msgs(src: &SocketAddr, msgs: Vec<CaMsg>) {
+pub fn handle_udp_ca_msgs(src: &SocketAddr, msgs: Vec<CaMsg>) {
     for msg in msgs {
         handle_udp_msg(src, msg);
     }
 }
 
-pub fn handle_tcp_msgs(src: &SocketAddr, msgs: Vec<CaMsg>) -> bool {
+pub fn handle_tcp_ca_msgs(src: &SocketAddr, msgs: Vec<CaMsg>) -> bool {
     for msg in msgs {
         if !handle_tcp_msg(src, msg) {
             return false;

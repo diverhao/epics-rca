@@ -1,14 +1,17 @@
 use crate::ca_message::header::CaHeader;
 use crate::ca_message::message::CaMsg;
 use crate::ca_message::message::MAX_UDP_SEND;
-use crate::ca_message::message_handler::handle_udp_msgs;
+use crate::ca_message::message_handler::handle_udp_ca_msgs;
 use crate::env::env::Env;
+use crate::pva_message::message::PvaMsg;
+use crate::pva_message::message_handler::handle_udp_pva_msgs;
 use crate::udp::addr_list::parse_ca_pva_addr_list;
 use ::log::debug;
 use ::log::error;
 use ::log::info;
 use core::net::SocketAddr;
 use std::char::MAX;
+use std::sync::atomic::AtomicI32;
 use std::sync::atomic::AtomicU32;
 use std::sync::atomic::Ordering;
 use std::sync::{Arc, RwLock, RwLockReadGuard, RwLockWriteGuard};
@@ -59,7 +62,7 @@ impl UDP {
             socket_v6,
             ca_addr_list,
             pva_addr_list,
-            search_seq_id: AtomicU32::new(0)
+            search_seq_id: AtomicU32::new(0),
         }
     }
 
@@ -74,8 +77,17 @@ impl UDP {
                 match socket_v4.recv_from(&mut buf).await {
                     Ok((size, remote_socket)) => {
                         let mut buf: Vec<u8> = buf[..size].to_vec();
-                        let msgs = CaMsg::from_buf(&mut buf, Some(remote_socket), vec![], false);
-                        handle_udp_msgs(&remote_socket, msgs);
+                        // use magic number to determine if this packet is CA or PVA
+                        let is_pva = buf.first() == Some(&0xca);
+                        if is_pva {
+                            let msgs: Vec<PvaMsg> =
+                                PvaMsg::from_buf(&mut buf, Some(remote_socket), vec![], false);
+                            handle_udp_pva_msgs(&remote_socket, msgs);
+                        } else {
+                            let msgs: Vec<CaMsg> =
+                                CaMsg::from_buf(&mut buf, Some(remote_socket), vec![], false);
+                            handle_udp_ca_msgs(&remote_socket, msgs);
+                        }
                     }
                     Err(err) => {
                         error!("Error receving UDP, {:?}", err);
@@ -89,8 +101,16 @@ impl UDP {
                 match socket_v6.recv_from(&mut buf).await {
                     Ok((size, remote_socket)) => {
                         let mut buf: Vec<u8> = buf[..size].to_vec();
-                        let msgs = CaMsg::from_buf(&mut buf, Some(remote_socket), vec![], false);
-                        handle_udp_msgs(&remote_socket, msgs);
+                        let is_pva = buf.first() == Some(&0xca);
+                        if is_pva {
+                            let msgs: Vec<PvaMsg> =
+                                PvaMsg::from_buf(&mut buf, Some(remote_socket), vec![], false);
+                            handle_udp_pva_msgs(&remote_socket, msgs);
+                        } else {
+                            let msgs: Vec<CaMsg> =
+                                CaMsg::from_buf(&mut buf, Some(remote_socket), vec![], false);
+                            handle_udp_ca_msgs(&remote_socket, msgs);
+                        }
                     }
                     Err(err) => {
                         error!("Error receving UDP, {:?}", err);
@@ -102,9 +122,15 @@ impl UDP {
 
     // -------------- network ----------------------
 
-    pub async fn send_buf(self: &Self, buf: &Vec<u8>) {
+    pub async fn send_buf(self: &Self, buf: &Vec<u8>, is_pva: bool) {
         // send to addresses in EPICS_CA_ADDR_LIST
-        for socket_addr in self.ca_addr_list() {
+        let addr_list = if is_pva {
+            self.pva_addr_list()
+        } else {
+            self.ca_addr_list()
+        };
+
+        for socket_addr in addr_list {
             match socket_addr {
                 SocketAddr::V4(_) => {
                     let sent = self.socket_v4().send_to(buf, socket_addr).await;
@@ -132,17 +158,17 @@ impl UDP {
         }
     }
 
-    pub async fn send_msgs(self: &Self, msgs: &Vec<CaMsg>) {
+    pub async fn send_ca_msgs(self: &Self, msgs: &Vec<CaMsg>) {
         let mut buf: Vec<u8> = vec![];
         for msg in msgs {
             debug!("\nSending UDP message {msg}");
             if buf.len() as u32 + msg.size() > MAX_UDP_SEND as u32 {
-                self.send_buf(&buf).await;
+                self.send_buf(&buf, false).await;
                 buf.clear();
             }
             buf.extend_from_slice(&msg.to_buf());
         }
-        self.send_buf(&buf).await;
+        self.send_buf(&buf, false).await;
     }
 
     // ----------------- getters -----------------
@@ -175,11 +201,9 @@ impl UDP {
         self.search_seq_id.load(Ordering::Relaxed)
     }
 
-
     // ---------------- setter ---------------------
 
     pub fn increment_search_seq_id(&self) -> u32 {
         self.search_seq_id.fetch_add(1, Ordering::Relaxed) + 1
     }
-
 }

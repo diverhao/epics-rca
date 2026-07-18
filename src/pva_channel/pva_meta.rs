@@ -1,24 +1,25 @@
-use std::os::unix::net::SocketAddr;
+use std::net::SocketAddr;
 
-use crate::{ca_channel::dbr::ChannelState, context::context::get_context, pva_channel::pva_channel::PvaChannel};
-
+use crate::{
+    ca_channel::dbr::ChannelState, context::context::get_context,
+    pva_channel::pva_channel::PvaChannel,
+};
 
 pub struct PvaMeta {
     pub state: ChannelState,
     // pub sid: u32, // server ID, assigned after channel created on server
-    // pub addr: Option<SocketAddr>,
+    pub addr: Option<SocketAddr>,
     // pub access_right: ChannelAccessRights,
     // pub data_type_native: DbrType,
     // pub data_count_native: u32,
 }
-
 
 impl PvaMeta {
     pub fn new() -> PvaMeta {
         PvaMeta {
             state: ChannelState::NameSearching,
             // sid: 0,
-            // addr: None,
+            addr: None,
             // access_right: ChannelAccessRights::None,
             // data_type_native: DbrType::Double,
             // data_count_native: 0,
@@ -35,9 +36,9 @@ impl PvaMeta {
     //     self.sid
     // }
 
-    // pub fn addr(&self) -> Option<SocketAddr> {
-    //     self.addr
-    // }
+    pub fn addr(&self) -> Option<SocketAddr> {
+        self.addr
+    }
 
     // pub fn access_right(&self) -> ChannelAccessRights {
     //     self.access_right
@@ -69,9 +70,9 @@ impl PvaMeta {
     //     self.sid = new_sid;
     // }
 
-    // pub fn set_addr(&mut self, new_addr: Option<SocketAddr>) {
-    //     self.addr = new_addr;
-    // }
+    pub fn set_addr(&mut self, new_addr: Option<SocketAddr>) {
+        self.addr = new_addr;
+    }
 
     // pub fn set_data_type_native(&mut self, new_data_type_native: DbrType) {
     //     self.data_type_native = new_data_type_native;
@@ -86,8 +87,6 @@ impl PvaMeta {
     // }
 }
 
-
-
 impl PvaChannel {
     // ------------------ getters ----------------
 
@@ -99,9 +98,9 @@ impl PvaChannel {
     //     self.meta().sid()
     // }
 
-    // pub fn addr(&self) -> Option<SocketAddr> {
-    //     self.meta().addr()
-    // }
+    pub fn addr(&self) -> Option<SocketAddr> {
+        self.meta().addr()
+    }
 
     // pub fn data_type_native(self: &Self) -> DbrType {
     //     self.meta().data_type_native()
@@ -116,7 +115,7 @@ impl PvaChannel {
     pub fn set_state(&self, new_state: ChannelState, notify_state: bool) {
         let old_state = self.state();
 
-        let channels = get_context().ca_channels();
+        let channels = get_context().pva_channels();
         if old_state == ChannelState::NameSearching
             && (new_state == ChannelState::Destroyed
                 || new_state == ChannelState::Created
@@ -146,9 +145,9 @@ impl PvaChannel {
     //     self.meta_mut().set_sid(new_sid);
     // }
 
-    // pub fn set_addr(&self, new_addr: Option<SocketAddr>) {
-    //     self.meta_mut().set_addr(new_addr);
-    // }
+    pub fn set_addr(&self, new_addr: Option<SocketAddr>) {
+        self.meta_mut().set_addr(new_addr);
+    }
 
     // pub fn set_data_type_native(&self, new_data_type_native: DbrType) {
     //     self.meta_mut().set_data_type_native(new_data_type_native);

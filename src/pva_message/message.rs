@@ -13,7 +13,7 @@ use crate::pva_message::type_registry::PvaTypeRegistry;
 use crate::pva_message::value::PvaValue;
 use crate::pva_message::{
     cmd::{PvaCmd, PvaCtrlCmd},
-    header::{MsgEndian, MsgSeg, MsgSrc, PVA_HEADER_SIZE, PvaCtrlHeader, PvaHeader},
+    header::{MsgEndian, MsgOrigin, MsgSeg, PVA_HEADER_SIZE, PvaCtrlHeader, PvaHeader},
     primitive::PvaElement,
 };
 
@@ -39,13 +39,15 @@ pub enum PvaAuthnz {
     Anonymous,
 }
 
-const MAX_PVA_PAYLOAD_SIZE: usize = i32::MAX as usize;
+const MAX_PVA_PAYLOAD_SIZE: usize = u32::MAX as usize;
 const EPICS_PVA_MAX_ARRAY_BYTES: usize = 0x10000;
 const MAX_TCP_RECV: usize = 0x10000;
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct PvaMsg {
     header: PvaHeader,
+    src: Option<SocketAddr>,
+    dest: Vec<SocketAddr>,
     payload: Vec<u8>,
 }
 
@@ -58,7 +60,7 @@ impl fmt::Display for PvaMsg {
         writeln!(f, "  {:<14}: {}", "Version", self.header.version())?;
         writeln!(f, "  {:<14}: {:?}", "Message Type", flags.msg_type)?;
         writeln!(f, "  {:<14}: {:?}", "Segmentation", flags.seg_type)?;
-        writeln!(f, "  {:<14}: {:?}", "Source", flags.src)?;
+        writeln!(f, "  {:<14}: {:?}", "Origin", flags.origin)?;
         writeln!(f, "  {:<14}: {:?}", "Endian", flags.endian)?;
         writeln!(f, "  {:<14}: {}", "Command", self.header.cmd())?;
         writeln!(
@@ -106,16 +108,20 @@ impl fmt::Display for PvaMsg {
 impl PvaMsg {
     pub fn new(
         seg_type: MsgSeg,
-        src: MsgSrc,
+        origin: MsgOrigin,
+        src: Option<SocketAddr>,
+        dest: Vec<SocketAddr>,
         endian: MsgEndian,
         cmd: PvaCmd,
         payload: Vec<u8>,
     ) -> Result<Self, String> {
-        let payload_size = i32::try_from(payload.len())
-            .map_err(|_| String::from("Error: PVA payload is larger than i32::MAX"))?;
+        let payload_size = u32::try_from(payload.len())
+            .map_err(|_| String::from("Error: PVA payload is larger than u32::MAX"))?;
 
         Ok(Self {
-            header: PvaHeader::new(seg_type, src, endian, cmd, payload_size)?,
+            header: PvaHeader::new(seg_type, origin, endian, cmd, payload_size)?,
+            src,
+            dest,
             payload,
         })
     }
@@ -143,43 +149,82 @@ impl PvaMsg {
         Ok(buf)
     }
 
-    pub fn from_buf(buf: &[u8], offset: &mut usize) -> Result<Self, String> {
-        let header_end = offset
-            .checked_add(PVA_HEADER_SIZE)
-            .ok_or_else(|| String::from("Error: PVA message header offset overflow"))?;
-        if header_end > buf.len() {
-            return Err(String::from(
-                "Warning: Remaining buffer too short for PVA message header",
-            ));
+    /**
+     * Decode all complete PVA application messages in `buf`.
+     *
+     * Complete messages are removed from the front of the buffer. An
+     * incomplete trailing message is retained for TCP and discarded for UDP.
+     */
+    pub fn from_buf(
+        buf: &mut Vec<u8>,
+        src: Option<SocketAddr>,
+        dest: Vec<SocketAddr>,
+        is_tcp: bool,
+    ) -> Vec<Self> {
+        let mut messages = Vec::new();
+
+        loop {
+            if buf.is_empty() {
+                break;
+            }
+
+            let header = match PvaHeader::from_buf(buf) {
+                Ok(header) => header,
+                Err(reason) => {
+                    if reason.starts_with("Error") || !is_tcp {
+                        buf.clear();
+                    }
+                    break;
+                }
+            };
+
+            let payload_size = match usize::try_from(header.payload_size()) {
+                Ok(payload_size) => payload_size,
+                Err(_) => {
+                    buf.clear();
+                    break;
+                }
+            };
+            let message_size = match PVA_HEADER_SIZE.checked_add(payload_size) {
+                Some(message_size) => message_size,
+                None => {
+                    buf.clear();
+                    break;
+                }
+            };
+
+            if buf.len() < message_size {
+                if !is_tcp {
+                    buf.clear();
+                }
+                break;
+            }
+
+            let message = Self {
+                header,
+                src,
+                dest: dest.clone(),
+                payload: buf[PVA_HEADER_SIZE..message_size].to_vec(),
+            };
+            buf.drain(..message_size);
+            messages.push(message);
         }
 
-        let header = PvaHeader::from_buf(&buf[*offset..header_end])?;
-        let payload_size = usize::try_from(header.payload_size())
-            .map_err(|_| String::from("Error: PVA payload size does not fit in usize"))?;
-        let message_end = header_end
-            .checked_add(payload_size)
-            .ok_or_else(|| String::from("Error: PVA message payload offset overflow"))?;
-
-        if message_end > buf.len() {
-            return Err(format!(
-                "Warning: Remaining buffer too short for PVA message: need {message_end} bytes, have {}",
-                buf.len()
-            ));
-        }
-
-        let message = Self {
-            header,
-            payload: buf[header_end..message_end].to_vec(),
-        };
-        message.validate()?;
-        *offset = message_end;
-        Ok(message)
+        messages
     }
 
     // ---------------- getter -----------------------
 
     pub fn header(&self) -> &PvaHeader {
         &self.header
+    }
+
+    pub fn src(&self) -> &Option<SocketAddr> {
+        &self.src
+    }
+
+    pub fn dest(&self) -> &Vec<SocketAddr> {
+        &self.dest
     }
 
     pub fn payload(&self) -> &[u8] {
@@ -193,9 +238,14 @@ pub struct PvaCtrlMsg {
 }
 
 impl PvaCtrlMsg {
-    pub fn new(src: MsgSrc, endian: MsgEndian, cmd: PvaCtrlCmd, data: i32) -> Result<Self, String> {
+    pub fn new(
+        origin: MsgOrigin,
+        endian: MsgEndian,
+        cmd: PvaCtrlCmd,
+        data: u32,
+    ) -> Result<Self, String> {
         Ok(Self {
-            header: PvaCtrlHeader::new(src, endian, cmd, data)?,
+            header: PvaCtrlHeader::new(origin, endian, cmd, data)?,
         })
     }
 
@@ -249,8 +299,8 @@ pub fn build_connection_validation(
     let mut buf: Vec<u8> = vec![];
 
     // maximum TCP receive buffer size
-    let tcp_buf_size: i32 = MAX_TCP_RECV as i32;
-    tcp_buf_size.to_buf(&PvaType::Int, &mut buf, endian)?;
+    let tcp_buf_size: u32 = MAX_TCP_RECV as u32;
+    tcp_buf_size.to_buf(&PvaType::UInt, &mut buf, endian)?;
 
     // introspection registry size
     let type_registry_size: i16 = 0x7fff;
@@ -306,7 +356,9 @@ pub fn build_connection_validation(
 
     PvaMsg::new(
         MsgSeg::NotSeg,
-        MsgSrc::Client,
+        MsgOrigin::Client,
+        None,
+        vec![],
         endian,
         PvaCmd::ConnectionValidation,
         buf,
@@ -319,15 +371,15 @@ pub fn build_echo(endian: MsgEndian) -> Result<Vec<u8>, String> {
     // struct echoRequest {
     //     byte[] somePayload;
     // };
-    let header = PvaHeader::new(MsgSeg::NotSeg, MsgSrc::Client, endian, PvaCmd::Echo, 0)?;
+    let header = PvaHeader::new(MsgSeg::NotSeg, MsgOrigin::Client, endian, PvaCmd::Echo, 0)?;
     return header.to_buf();
 }
 
 pub fn build_search(
-    search_seq_id: i32,
+    search_seq_id: u32,
     endian: MsgEndian,
     response_addr: SocketAddr,
-    channel_names_cids: &Vec<(String, i32)>,
+    channel_names_cids: &Vec<(String, u32)>,
 ) -> Result<Vec<u8>, String> {
     // reject 0-size channel search
     if channel_names_cids.len() == 0 {
@@ -357,7 +409,7 @@ pub fn build_search(
     let mut buf: Vec<u8> = vec![];
 
     // search sequence ID
-    search_seq_id.to_buf(&PvaType::Int, &mut buf, endian)?;
+    search_seq_id.to_buf(&PvaType::UInt, &mut buf, endian)?;
 
     // flags, no reply if not found, broadcast only
     // bit 0: 1 means require reply if not found, 0 means no reply required
@@ -412,7 +464,7 @@ pub fn build_search(
         fields: vec![
             Arc::new(PvaFieldType {
                 name: "searchInstanceID".to_string(),
-                typ: Arc::new(PvaType::Int),
+                typ: Arc::new(PvaType::UInt),
             }),
             Arc::new(PvaFieldType {
                 name: "channelName".to_string(),
@@ -431,7 +483,7 @@ pub fn build_search(
     // name struct values, they are not PVA structure variable size array!
     for (name, cid) in channel_names_cids {
         let struct_value = PvaStructValue {
-            fields: vec![PvaValue::Int(*cid), PvaValue::String(name.clone())],
+            fields: vec![PvaValue::UInt(*cid), PvaValue::String(name.clone())],
         };
         PvaValue::Struct(struct_value).to_buf(
             Arc::clone(&struct_typ),
@@ -442,7 +494,7 @@ pub fn build_search(
     }
 
     // header, we need to know payload first
-    let payload_size = match i32::try_from(buf.len()) {
+    let payload_size = match u32::try_from(buf.len()) {
         Ok(payload_size) => payload_size,
         Err(_) => return Err("payload size overflow".to_string()),
     };
@@ -452,7 +504,7 @@ pub fn build_search(
 
     let header = PvaHeader::new(
         MsgSeg::NotSeg,
-        MsgSrc::Client,
+        MsgOrigin::Client,
         endian,
         PvaCmd::Search,
         payload_size,
@@ -464,7 +516,7 @@ pub fn build_search(
 
 pub fn build_create_channel(
     name: String,
-    cid: i32,
+    cid: u32,
     endian: MsgEndian,
     pva_type_registry: &mut PvaTypeRegistry,
 ) -> Result<Vec<u8>, String> {
@@ -491,7 +543,7 @@ pub fn build_create_channel(
         fields: vec![
             Arc::new(PvaFieldType {
                 name: "clientChannelID".to_string(),
-                typ: Arc::new(PvaType::Int),
+                typ: Arc::new(PvaType::UInt),
             }),
             Arc::new(PvaFieldType {
                 name: "channelName".to_string(),
@@ -501,13 +553,15 @@ pub fn build_create_channel(
     })));
     // only one name allowed
     let struct_value = PvaValue::Struct(PvaStructValue {
-        fields: vec![PvaValue::Int(cid), PvaValue::String(name)],
+        fields: vec![PvaValue::UInt(cid), PvaValue::String(name)],
     });
     struct_value.to_buf(Arc::clone(&typ), &mut buf, endian, pva_type_registry)?;
 
     PvaMsg::new(
         MsgSeg::NotSeg,
-        MsgSrc::Client,
+        MsgOrigin::Client,
+        None,
+        vec![],
         endian,
         PvaCmd::CreateChannel,
         buf,
@@ -515,7 +569,7 @@ pub fn build_create_channel(
     .to_buf()
 }
 
-pub fn build_destroy_channel(cid: i32, sid: i32, endian: MsgEndian) -> Result<Vec<u8>, String> {
+pub fn build_destroy_channel(cid: u32, sid: u32, endian: MsgEndian) -> Result<Vec<u8>, String> {
     // struct destroyChannelRequest {
     //     int serverChannelID;
     //     int clientChannelID;
@@ -523,15 +577,17 @@ pub fn build_destroy_channel(cid: i32, sid: i32, endian: MsgEndian) -> Result<Ve
     let mut buf: Vec<u8> = vec![];
 
     // sid
-    sid.to_buf(&PvaType::Int, &mut buf, endian)?;
+    sid.to_buf(&PvaType::UInt, &mut buf, endian)?;
 
     // cid
-    cid.to_buf(&PvaType::Int, &mut buf, endian)?;
+    cid.to_buf(&PvaType::UInt, &mut buf, endian)?;
 
     // message with header
     PvaMsg::new(
         MsgSeg::NotSeg,
-        MsgSrc::Client,
+        MsgOrigin::Client,
+        None,
+        vec![],
         endian,
         PvaCmd::DestroyChannel,
         buf,
@@ -540,8 +596,8 @@ pub fn build_destroy_channel(cid: i32, sid: i32, endian: MsgEndian) -> Result<Ve
 }
 
 pub fn build_get_init(
-    sid: i32,
-    ioid: i32,
+    sid: u32,
+    ioid: u32,
     pv_request_str: String,
     endian: MsgEndian,
     pva_type_registry: &mut PvaTypeRegistry,
@@ -556,10 +612,10 @@ pub fn build_get_init(
     let mut buf: Vec<u8> = vec![];
 
     // sid
-    sid.to_buf(&PvaType::Int, &mut buf, endian)?;
+    sid.to_buf(&PvaType::UInt, &mut buf, endian)?;
 
     // ioid
-    ioid.to_buf(&PvaType::Int, &mut buf, endian)?;
+    ioid.to_buf(&PvaType::UInt, &mut buf, endian)?;
 
     // 0x08
     (0x08 as u8).to_buf(&PvaType::UByte, &mut buf, endian)?;
@@ -579,12 +635,21 @@ pub fn build_get_init(
     )?;
 
     // message with header
-    PvaMsg::new(MsgSeg::NotSeg, MsgSrc::Client, endian, PvaCmd::Get, buf)?.to_buf()
+    PvaMsg::new(
+        MsgSeg::NotSeg,
+        MsgOrigin::Client,
+        None,
+        vec![],
+        endian,
+        PvaCmd::Get,
+        buf,
+    )?
+    .to_buf()
 }
 
 pub fn build_get(
-    sid: i32,
-    ioid: i32,
+    sid: u32,
+    ioid: u32,
     endian: MsgEndian,
     destroy_get: bool,
 ) -> Result<Vec<u8>, String> {
@@ -596,10 +661,10 @@ pub fn build_get(
     let mut buf: Vec<u8> = vec![];
 
     // sid
-    sid.to_buf(&PvaType::Int, &mut buf, endian)?;
+    sid.to_buf(&PvaType::UInt, &mut buf, endian)?;
 
     // ioid
-    ioid.to_buf(&PvaType::Int, &mut buf, endian)?;
+    ioid.to_buf(&PvaType::UInt, &mut buf, endian)?;
 
     // 0x00
     if destroy_get {
@@ -608,12 +673,21 @@ pub fn build_get(
         (0x00 as i8).to_buf(&PvaType::Byte, &mut buf, endian)?;
     }
 
-    PvaMsg::new(MsgSeg::NotSeg, MsgSrc::Client, endian, PvaCmd::Get, buf)?.to_buf()
+    PvaMsg::new(
+        MsgSeg::NotSeg,
+        MsgOrigin::Client,
+        None,
+        vec![],
+        endian,
+        PvaCmd::Get,
+        buf,
+    )?
+    .to_buf()
 }
 
 pub fn build_put_init(
-    sid: i32,
-    ioid: i32,
+    sid: u32,
+    ioid: u32,
     pv_request_str: String,
     endian: MsgEndian,
     pva_type_registry: &mut PvaTypeRegistry,
@@ -629,10 +703,10 @@ pub fn build_put_init(
     let mut buf: Vec<u8> = vec![];
 
     // sid
-    sid.to_buf(&PvaType::Int, &mut buf, endian)?;
+    sid.to_buf(&PvaType::UInt, &mut buf, endian)?;
 
     // ioid
-    ioid.to_buf(&PvaType::Int, &mut buf, endian)?;
+    ioid.to_buf(&PvaType::UInt, &mut buf, endian)?;
 
     // 0x08
     (0x08 as u8).to_buf(&PvaType::UByte, &mut buf, endian)?;
@@ -652,12 +726,21 @@ pub fn build_put_init(
     )?;
 
     // message with header
-    PvaMsg::new(MsgSeg::NotSeg, MsgSrc::Client, endian, PvaCmd::Put, buf)?.to_buf()
+    PvaMsg::new(
+        MsgSeg::NotSeg,
+        MsgOrigin::Client,
+        None,
+        vec![],
+        endian,
+        PvaCmd::Put,
+        buf,
+    )?
+    .to_buf()
 }
 
 pub fn build_put(
-    sid: i32,
-    ioid: i32,
+    sid: u32,
+    ioid: u32,
     typ: Arc<PvaType>,
     field_paths: Vec<String>,
     value: PvaValue,
@@ -675,10 +758,10 @@ pub fn build_put(
     let mut buf: Vec<u8> = vec![];
 
     // sid
-    sid.to_buf(&PvaType::Int, &mut buf, endian)?;
+    sid.to_buf(&PvaType::UInt, &mut buf, endian)?;
 
     // ioid
-    ioid.to_buf(&PvaType::Int, &mut buf, endian)?;
+    ioid.to_buf(&PvaType::UInt, &mut buf, endian)?;
 
     // 0x00
     if destroy_upon_finish {
@@ -693,13 +776,22 @@ pub fn build_put(
     //  partial data
     value.to_buf_with_bitset(typ, &bit_set, &mut buf, endian, pva_type_registry)?;
 
-    PvaMsg::new(MsgSeg::NotSeg, MsgSrc::Client, endian, PvaCmd::Put, buf)?.to_buf()
+    PvaMsg::new(
+        MsgSeg::NotSeg,
+        MsgOrigin::Client,
+        None,
+        vec![],
+        endian,
+        PvaCmd::Put,
+        buf,
+    )?
+    .to_buf()
 }
 
 // GET the value from a PUT channle
 pub fn build_get_from_put(
-    sid: i32,
-    ioid: i32,
+    sid: u32,
+    ioid: u32,
     endian: MsgEndian,
     destroy_upon_finish: bool,
 ) -> Result<Vec<u8>, String> {
@@ -711,10 +803,10 @@ pub fn build_get_from_put(
     // };
 
     // sid
-    sid.to_buf(&PvaType::Int, &mut buf, endian)?;
+    sid.to_buf(&PvaType::UInt, &mut buf, endian)?;
 
     // ioid
-    ioid.to_buf(&PvaType::Int, &mut buf, endian)?;
+    ioid.to_buf(&PvaType::UInt, &mut buf, endian)?;
 
     // 0x40 and 0x10
     if destroy_upon_finish {
@@ -723,14 +815,23 @@ pub fn build_get_from_put(
         (0x40 as u8).to_buf(&PvaType::UByte, &mut buf, endian)?;
     }
 
-    PvaMsg::new(MsgSeg::NotSeg, MsgSrc::Client, endian, PvaCmd::Put, buf)?.to_buf()
+    PvaMsg::new(
+        MsgSeg::NotSeg,
+        MsgOrigin::Client,
+        None,
+        vec![],
+        endian,
+        PvaCmd::Put,
+        buf,
+    )?
+    .to_buf()
 }
 
 // put then get
 // practically the same as build_put()
 pub fn build_put_get_init(
-    sid: i32,
-    ioid: i32,
+    sid: u32,
+    ioid: u32,
     put_pv_request_str: String,
     get_pv_request_str: String,
     endian: MsgEndian,
@@ -747,10 +848,10 @@ pub fn build_put_get_init(
     // };
 
     // sid
-    sid.to_buf(&PvaType::Int, &mut buf, endian)?;
+    sid.to_buf(&PvaType::UInt, &mut buf, endian)?;
 
     // ioid
-    ioid.to_buf(&PvaType::Int, &mut buf, endian)?;
+    ioid.to_buf(&PvaType::UInt, &mut buf, endian)?;
 
     // 0x08
     (0x08 as u8).to_buf(&PvaType::UByte, &mut buf, endian)?;
@@ -770,12 +871,21 @@ pub fn build_put_get_init(
     )?;
 
     // message with header
-    PvaMsg::new(MsgSeg::NotSeg, MsgSrc::Client, endian, PvaCmd::PutGet, buf)?.to_buf()
+    PvaMsg::new(
+        MsgSeg::NotSeg,
+        MsgOrigin::Client,
+        None,
+        vec![],
+        endian,
+        PvaCmd::PutGet,
+        buf,
+    )?
+    .to_buf()
 }
 
 pub fn build_put_get(
-    sid: i32,
-    ioid: i32,
+    sid: u32,
+    ioid: u32,
     typ: Arc<PvaType>,
     field_paths: Vec<String>,
     value: PvaValue,
@@ -794,10 +904,10 @@ pub fn build_put_get(
     let mut buf: Vec<u8> = vec![];
 
     // sid
-    sid.to_buf(&PvaType::Int, &mut buf, endian)?;
+    sid.to_buf(&PvaType::UInt, &mut buf, endian)?;
 
     // ioid
-    ioid.to_buf(&PvaType::Int, &mut buf, endian)?;
+    ioid.to_buf(&PvaType::UInt, &mut buf, endian)?;
 
     // 0x00
     if destroy_upon_finish {
@@ -812,13 +922,22 @@ pub fn build_put_get(
     //  partial data
     value.to_buf_with_bitset(typ, &bit_set, &mut buf, endian, pva_type_registry)?;
 
-    PvaMsg::new(MsgSeg::NotSeg, MsgSrc::Client, endian, PvaCmd::PutGet, buf)?.to_buf()
+    PvaMsg::new(
+        MsgSeg::NotSeg,
+        MsgOrigin::Client,
+        None,
+        vec![],
+        endian,
+        PvaCmd::PutGet,
+        buf,
+    )?
+    .to_buf()
 }
 
 // GET the value of pvPutStructureIF type from an existing PUT_GET channel
 pub fn build_get_put_from_put_get(
-    sid: i32,
-    ioid: i32,
+    sid: u32,
+    ioid: u32,
     endian: MsgEndian,
     destroy_upon_finish: bool,
 ) -> Result<Vec<u8>, String> {
@@ -830,10 +949,10 @@ pub fn build_get_put_from_put_get(
     // };
 
     // sid
-    sid.to_buf(&PvaType::Int, &mut buf, endian)?;
+    sid.to_buf(&PvaType::UInt, &mut buf, endian)?;
 
     // ioid
-    ioid.to_buf(&PvaType::Int, &mut buf, endian)?;
+    ioid.to_buf(&PvaType::UInt, &mut buf, endian)?;
 
     // 0x80
     if destroy_upon_finish {
@@ -842,13 +961,22 @@ pub fn build_get_put_from_put_get(
         (0x80 as u8).to_buf(&PvaType::UByte, &mut buf, endian)?;
     }
 
-    PvaMsg::new(MsgSeg::NotSeg, MsgSrc::Client, endian, PvaCmd::PutGet, buf)?.to_buf()
+    PvaMsg::new(
+        MsgSeg::NotSeg,
+        MsgOrigin::Client,
+        None,
+        vec![],
+        endian,
+        PvaCmd::PutGet,
+        buf,
+    )?
+    .to_buf()
 }
 
 // GET the value of pvGetStructureIF type from an existing PUT_GET channel
 pub fn build_get_get_from_put_get(
-    sid: i32,
-    ioid: i32,
+    sid: u32,
+    ioid: u32,
     endian: MsgEndian,
     destroy_upon_finish: bool,
 ) -> Result<Vec<u8>, String> {
@@ -860,10 +988,10 @@ pub fn build_get_get_from_put_get(
     // };
 
     // sid
-    sid.to_buf(&PvaType::Int, &mut buf, endian)?;
+    sid.to_buf(&PvaType::UInt, &mut buf, endian)?;
 
     // ioid
-    ioid.to_buf(&PvaType::Int, &mut buf, endian)?;
+    ioid.to_buf(&PvaType::UInt, &mut buf, endian)?;
 
     // 0x40
     if destroy_upon_finish {
@@ -872,12 +1000,21 @@ pub fn build_get_get_from_put_get(
         (0x40 as u8).to_buf(&PvaType::UByte, &mut buf, endian)?;
     }
 
-    PvaMsg::new(MsgSeg::NotSeg, MsgSrc::Client, endian, PvaCmd::PutGet, buf)?.to_buf()
+    PvaMsg::new(
+        MsgSeg::NotSeg,
+        MsgOrigin::Client,
+        None,
+        vec![],
+        endian,
+        PvaCmd::PutGet,
+        buf,
+    )?
+    .to_buf()
 }
 
 pub fn build_monitor_init(
-    sid: i32,
-    ioid: i32,
+    sid: u32,
+    ioid: u32,
     endian: MsgEndian,
     pv_request_str: String,
     pva_type_registry: &mut PvaTypeRegistry,
@@ -885,10 +1022,10 @@ pub fn build_monitor_init(
     let mut buf: Vec<u8> = vec![];
 
     // sid
-    sid.to_buf(&PvaType::Int, &mut buf, endian)?;
+    sid.to_buf(&PvaType::UInt, &mut buf, endian)?;
 
     // ioid
-    ioid.to_buf(&PvaType::Int, &mut buf, endian)?;
+    ioid.to_buf(&PvaType::UInt, &mut buf, endian)?;
 
     // 0x08
     (0x08_u8).to_buf(&PvaType::UByte, &mut buf, endian)?;
@@ -907,37 +1044,55 @@ pub fn build_monitor_init(
         pva_type_registry,
     )?;
 
-    PvaMsg::new(MsgSeg::NotSeg, MsgSrc::Client, endian, PvaCmd::Monitor, buf)?.to_buf()
+    PvaMsg::new(
+        MsgSeg::NotSeg,
+        MsgOrigin::Client,
+        None,
+        vec![],
+        endian,
+        PvaCmd::Monitor,
+        buf,
+    )?
+    .to_buf()
 }
 
-pub fn build_monitor_start(sid: i32, ioid: i32, endian: MsgEndian) -> Result<Vec<u8>, String> {
+pub fn build_monitor_start(sid: u32, ioid: u32, endian: MsgEndian) -> Result<Vec<u8>, String> {
     let mut buf: Vec<u8> = vec![];
 
     // sid
-    sid.to_buf(&PvaType::Int, &mut buf, endian)?;
+    sid.to_buf(&PvaType::UInt, &mut buf, endian)?;
 
     // ioid
-    ioid.to_buf(&PvaType::Int, &mut buf, endian)?;
+    ioid.to_buf(&PvaType::UInt, &mut buf, endian)?;
 
     // 0x44
     (0x44_u8).to_buf(&PvaType::UByte, &mut buf, endian)?;
 
-    PvaMsg::new(MsgSeg::NotSeg, MsgSrc::Client, endian, PvaCmd::Monitor, buf)?.to_buf()
+    PvaMsg::new(
+        MsgSeg::NotSeg,
+        MsgOrigin::Client,
+        None,
+        vec![],
+        endian,
+        PvaCmd::Monitor,
+        buf,
+    )?
+    .to_buf()
 }
 
 pub fn build_monitor_stop(
-    sid: i32,
-    ioid: i32,
+    sid: u32,
+    ioid: u32,
     endian: MsgEndian,
     destroy: bool,
 ) -> Result<Vec<u8>, String> {
     let mut buf: Vec<u8> = vec![];
 
     // sid
-    sid.to_buf(&PvaType::Int, &mut buf, endian)?;
+    sid.to_buf(&PvaType::UInt, &mut buf, endian)?;
 
     // ioid
-    ioid.to_buf(&PvaType::Int, &mut buf, endian)?;
+    ioid.to_buf(&PvaType::UInt, &mut buf, endian)?;
 
     // 0x04
     if destroy {
@@ -946,10 +1101,19 @@ pub fn build_monitor_stop(
         (0x04_u8).to_buf(&PvaType::UByte, &mut buf, endian)?;
     }
 
-    PvaMsg::new(MsgSeg::NotSeg, MsgSrc::Client, endian, PvaCmd::Monitor, buf)?.to_buf()
+    PvaMsg::new(
+        MsgSeg::NotSeg,
+        MsgOrigin::Client,
+        None,
+        vec![],
+        endian,
+        PvaCmd::Monitor,
+        buf,
+    )?
+    .to_buf()
 }
 
-pub fn build_destroy_request(sid: i32, ioid: i32, endian: MsgEndian) -> Result<Vec<u8>, String> {
+pub fn build_destroy_request(sid: u32, ioid: u32, endian: MsgEndian) -> Result<Vec<u8>, String> {
     let mut buf: Vec<u8> = vec![];
     // struct destroyRequest {
     //     int serverChannelID;
@@ -957,14 +1121,16 @@ pub fn build_destroy_request(sid: i32, ioid: i32, endian: MsgEndian) -> Result<V
     // };
 
     // sid
-    sid.to_buf(&PvaType::Int, &mut buf, endian)?;
+    sid.to_buf(&PvaType::UInt, &mut buf, endian)?;
 
     // ioid
-    ioid.to_buf(&PvaType::Int, &mut buf, endian)?;
+    ioid.to_buf(&PvaType::UInt, &mut buf, endian)?;
 
     PvaMsg::new(
         MsgSeg::NotSeg,
-        MsgSrc::Client,
+        MsgOrigin::Client,
+        None,
+        vec![],
         endian,
         PvaCmd::DestroyRequest,
         buf,
@@ -975,8 +1141,8 @@ pub fn build_destroy_request(sid: i32, ioid: i32, endian: MsgEndian) -> Result<V
 // todo: CMD_ARRAY (0x0E)
 
 pub fn build_process_init(
-    sid: i32,
-    ioid: i32,
+    sid: u32,
+    ioid: u32,
     endian: MsgEndian,
     pv_request_str: String,
     pva_type_registry: &mut PvaTypeRegistry,
@@ -992,10 +1158,10 @@ pub fn build_process_init(
     // };
 
     // sid
-    sid.to_buf(&PvaType::Int, &mut buf, endian)?;
+    sid.to_buf(&PvaType::UInt, &mut buf, endian)?;
 
     // ioid
-    ioid.to_buf(&PvaType::Int, &mut buf, endian)?;
+    ioid.to_buf(&PvaType::UInt, &mut buf, endian)?;
 
     // 0x08
     (0x08_u8).to_buf(&PvaType::UByte, &mut buf, endian)?;
@@ -1014,12 +1180,21 @@ pub fn build_process_init(
         pva_type_registry,
     )?;
 
-    PvaMsg::new(MsgSeg::NotSeg, MsgSrc::Client, endian, PvaCmd::Process, buf)?.to_buf()
+    PvaMsg::new(
+        MsgSeg::NotSeg,
+        MsgOrigin::Client,
+        None,
+        vec![],
+        endian,
+        PvaCmd::Process,
+        buf,
+    )?
+    .to_buf()
 }
 
 pub fn build_process(
-    sid: i32,
-    ioid: i32,
+    sid: u32,
+    ioid: u32,
     endian: MsgEndian,
     destroy_upon_finish: bool,
 ) -> Result<Vec<u8>, String> {
@@ -1032,10 +1207,10 @@ pub fn build_process(
     // };
 
     // sid
-    sid.to_buf(&PvaType::Int, &mut buf, endian)?;
+    sid.to_buf(&PvaType::UInt, &mut buf, endian)?;
 
     // ioid
-    ioid.to_buf(&PvaType::Int, &mut buf, endian)?;
+    ioid.to_buf(&PvaType::UInt, &mut buf, endian)?;
 
     // 0x00
     if destroy_upon_finish {
@@ -1044,12 +1219,21 @@ pub fn build_process(
         (0x00_u8).to_buf(&PvaType::UByte, &mut buf, endian)?;
     }
 
-    PvaMsg::new(MsgSeg::NotSeg, MsgSrc::Client, endian, PvaCmd::Process, buf)?.to_buf()
+    PvaMsg::new(
+        MsgSeg::NotSeg,
+        MsgOrigin::Client,
+        None,
+        vec![],
+        endian,
+        PvaCmd::Process,
+        buf,
+    )?
+    .to_buf()
 }
 
 pub fn build_get_field(
-    sid: i32,
-    ioid: i32,
+    sid: u32,
+    ioid: u32,
     endian: MsgEndian,
     sub_field_name: String,
 ) -> Result<Vec<u8>, String> {
@@ -1061,17 +1245,19 @@ pub fn build_get_field(
     // };
 
     // sid
-    sid.to_buf(&PvaType::Int, &mut buf, endian)?;
+    sid.to_buf(&PvaType::UInt, &mut buf, endian)?;
 
     // ioid
-    ioid.to_buf(&PvaType::Int, &mut buf, endian)?;
+    ioid.to_buf(&PvaType::UInt, &mut buf, endian)?;
 
     // sub field name
     sub_field_name.to_buf(&PvaType::String, &mut buf, endian)?;
 
     PvaMsg::new(
         MsgSeg::NotSeg,
-        MsgSrc::Client,
+        MsgOrigin::Client,
+        None,
+        vec![],
         endian,
         PvaCmd::GetField,
         buf,
@@ -1084,8 +1270,8 @@ pub fn build_get_field(
 // depracated: CMD_MULTIPLE_DATA (0x13)
 
 pub fn build_rpc_init(
-    sid: i32,
-    ioid: i32,
+    sid: u32,
+    ioid: u32,
     endian: MsgEndian,
     pva_type_registry: &mut PvaTypeRegistry,
 ) -> Result<Vec<u8>, String> {
@@ -1100,10 +1286,10 @@ pub fn build_rpc_init(
     // };
 
     // sid
-    sid.to_buf(&PvaType::Int, &mut buf, endian)?;
+    sid.to_buf(&PvaType::UInt, &mut buf, endian)?;
 
     // ioid
-    ioid.to_buf(&PvaType::Int, &mut buf, endian)?;
+    ioid.to_buf(&PvaType::UInt, &mut buf, endian)?;
 
     // 0x08
     (0x08_i8).to_buf(&PvaType::Byte, &mut buf, endian)?;
@@ -1123,12 +1309,21 @@ pub fn build_rpc_init(
         pva_type_registry,
     )?;
 
-    PvaMsg::new(MsgSeg::NotSeg, MsgSrc::Client, endian, PvaCmd::Rpc, buf)?.to_buf()
+    PvaMsg::new(
+        MsgSeg::NotSeg,
+        MsgOrigin::Client,
+        None,
+        vec![],
+        endian,
+        PvaCmd::Rpc,
+        buf,
+    )?
+    .to_buf()
 }
 
 pub fn build_rpc(
-    sid: i32,
-    ioid: i32,
+    sid: u32,
+    ioid: u32,
     endian: MsgEndian,
     pva_type_registry: &mut PvaTypeRegistry,
     input_type: PvaType,
@@ -1151,10 +1346,10 @@ pub fn build_rpc(
     // };
 
     // sid
-    sid.to_buf(&PvaType::Int, &mut buf, endian)?;
+    sid.to_buf(&PvaType::UInt, &mut buf, endian)?;
 
     // ioid
-    ioid.to_buf(&PvaType::Int, &mut buf, endian)?;
+    ioid.to_buf(&PvaType::UInt, &mut buf, endian)?;
 
     // 0x00
     if destroy_upon_finish {
@@ -1169,10 +1364,19 @@ pub fn build_rpc(
     // input argument's value
     input_value.to_buf(Arc::new(input_type), &mut buf, endian, pva_type_registry)?;
 
-    PvaMsg::new(MsgSeg::NotSeg, MsgSrc::Client, endian, PvaCmd::Rpc, buf)?.to_buf()
+    PvaMsg::new(
+        MsgSeg::NotSeg,
+        MsgOrigin::Client,
+        None,
+        vec![],
+        endian,
+        PvaCmd::Rpc,
+        buf,
+    )?
+    .to_buf()
 }
 
-pub fn build_cancel_request(sid: i32, ioid: i32, endian: MsgEndian) -> Result<Vec<u8>, String> {
+pub fn build_cancel_request(sid: u32, ioid: u32, endian: MsgEndian) -> Result<Vec<u8>, String> {
     let mut buf: Vec<u8> = vec![];
     // struct cancelRequest {
     //     int serverChannelID;
@@ -1180,14 +1384,16 @@ pub fn build_cancel_request(sid: i32, ioid: i32, endian: MsgEndian) -> Result<Ve
     // };
 
     // sid
-    sid.to_buf(&PvaType::Int, &mut buf, endian)?;
+    sid.to_buf(&PvaType::UInt, &mut buf, endian)?;
 
     // ioid
-    ioid.to_buf(&PvaType::Int, &mut buf, endian)?;
+    ioid.to_buf(&PvaType::UInt, &mut buf, endian)?;
 
     PvaMsg::new(
         MsgSeg::NotSeg,
-        MsgSrc::Client,
+        MsgOrigin::Client,
+        None,
+        vec![],
         endian,
         PvaCmd::CancelRequest,
         buf,

@@ -40,7 +40,7 @@ async fn main() {
     .await;
 
     let context = get_context();
-    context.start_search_ca();
+    context.start_search();
 
     println!("{:?}", context.env().get_env("EPICS_CA_BEACON_PERIOD"));
     println!(
@@ -173,38 +173,33 @@ async fn main() {
     // context.create_ca_channel("val2afadsfsa");
     // println!("{}", context.ca_channels());
 
-    for ii in 0..100000 {
+    for ii in 0..1 {
         let callback = Arc::clone(&callback1);
-        // println!("{}", ii);
         let context = get_context().clone();
-        // tokio::spawn(async move {
         let name = format!("val{}", ii);
-        // println!("{}", name);
-        let channel = context.create_ca_channel(&name);
-        channel.start_to_monitor(Some(MonitorDataType::NativeTime), None, Some(callback));
-        // println!("-->{}", name);
-        // });
+        let channel = context.create_pva_channel(&name);
+        // channel.start_to_monitor(Some(MonitorDataType::NativeTime), None, Some(callback));
     }
 
-    print_alloc_stats("after-create-loop");
+    // print_alloc_stats("after-create-loop");
 
-    let mut alloc_report_interval = time::interval(Duration::from_secs(5));
-    let ctrl_c = tokio::signal::ctrl_c();
-    tokio::pin!(ctrl_c);
+    // let mut alloc_report_interval = time::interval(Duration::from_secs(5));
+    // let ctrl_c = tokio::signal::ctrl_c();
+    // tokio::pin!(ctrl_c);
 
-    loop {
-        tokio::select! {
-            _ = alloc_report_interval.tick() => {
-                print_alloc_stats("periodic");
-            }
-            result = &mut ctrl_c => {
-                result.expect("failed to listen for Ctrl-C");
-                break;
-            }
-        }
-    }
+    // loop {
+    //     tokio::select! {
+    //         _ = alloc_report_interval.tick() => {
+    //             print_alloc_stats("periodic");
+    //         }
+    //         result = &mut ctrl_c => {
+    //             result.expect("failed to listen for Ctrl-C");
+    //             break;
+    //         }
+    //     }
+    // }
 
-    print_alloc_stats("final");
+    // print_alloc_stats("final");
 }
 
 fn print_alloc_stats(label: &str) {

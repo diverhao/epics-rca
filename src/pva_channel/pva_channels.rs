@@ -4,15 +4,16 @@ use crate::env::env::EnvType;
 use crate::pva_message::header::MsgEndian;
 use crate::pva_message::message::build_search;
 use crate::{context::context::get_context, pva_channel::pva_channel::PvaChannel};
-use log::{debug, warn};
+use log::{debug, error, warn};
 use std::char::MAX;
 use std::collections::HashMap;
+use std::f32::consts::E;
 use std::fmt;
 use std::sync::Arc;
 use std::sync::RwLock;
 use std::sync::RwLockReadGuard;
 use std::sync::RwLockWriteGuard;
-use std::sync::atomic::{AtomicBool, AtomicU32, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicI32, AtomicU32, Ordering};
 use tokio::time::{self, Duration};
 
 // #[derive(Clone)]
@@ -249,7 +250,12 @@ impl PvaChannels {
 
             loop {
                 interval.tick().await;
-                self.search().await;
+                match self.search().await {
+                    Ok(_) => {}
+                    Err(error) => {
+                        error!("{}", error);
+                    }
+                };
             }
         });
     }
@@ -264,58 +270,67 @@ impl PvaChannels {
             Ok(socket_addr) => socket_addr,
             Err(_) => return Err("".to_string()),
         };
+        // use Big endian
         let endian = MsgEndian::Big;
 
-        let mut packet_size: usize = 30;
-        let mut channel_names_cids: Vec<(String, i32)> = vec![];
+        let mut buf: Vec<Vec<u8>> = vec![];
+        let mut packet_size: usize = 41;
+        let mut channel_names_cids: Vec<(String, u32)> = vec![];
 
         for channel in self.searching_by_cid().values() {
             let name = channel.name();
             let cid = channel.cid();
 
-            // cid = 4 bytes, 1 byte for name size, I'm betting the pv name length is less than 254
-            packet_size += 4 + name.len() + 1;
+            let channel_state = channel.state();
+            if channel_state != ChannelState::NameSearching {
+                debug!(
+                    "Channel {name} is already found ({:?}), skip name search",
+                    channel_state
+                );
+                continue;
+            }
 
-            if packet_size > MAX_UDP_SEND {
+            let search_counter = channel.search_counter();
+            if !search_counter.is_power_of_two() {
+                channel.increment_search_counter();
+                debug!("Skip this search for {name} as search counter = {search_counter}");
+                continue;
+            } else {
+                channel.increment_search_counter();
+            }
+
+            // cid = 4 bytes, 1 byte for name size, I'm betting the pv name length is less than 254
+            let packet_size_estimate = packet_size + 4 + name.len() + 1;
+
+            if packet_size_estimate > MAX_UDP_SEND {
                 // send out
                 let context = get_context();
                 let udp = context.udp();
-                let search_seq_id = udp.increment_search_seq_id() as i32;
-                let buf = build_search(search_seq_id, endian, response_addr, &channel_names_cids)?;
-                udp.send_buf(&buf);
+                let search_seq_id = udp.increment_search_seq_id();
+                let buf_packet =
+                    build_search(search_seq_id, endian, response_addr, &channel_names_cids)?;
+                buf.push(buf_packet);
                 // clear names
-                packet_size = 30;
+                packet_size = 41;
                 channel_names_cids.clear();
-            } else {
-                let channel_state = channel.state();
-                if channel_state != ChannelState::NameSearching {
-                    debug!(
-                        "Channel {name} is already found ({:?}), skip name search",
-                        channel_state
-                    );
-                    continue;
-                }
-
-                let search_counter = channel.search_counter();
-                if !search_counter.is_power_of_two() {
-                    channel.increment_search_counter();
-                    debug!("Skip this search for {name} as search counter = {search_counter}");
-                    continue;
-                } else {
-                    channel.increment_search_counter();
-                }
-                channel.set_state(ChannelState::NameSearching, true);
-                channel_names_cids.push((name.to_string(), cid as i32));
             }
-        }
 
+            channel.set_state(ChannelState::NameSearching, true);
+            packet_size += 4 + name.len() + 1;
+            channel_names_cids.push((name.to_string(), cid));
+        }
 
         if channel_names_cids.len() > 0 {
             let context = get_context();
             let udp = context.udp();
-            let search_seq_id = udp.increment_search_seq_id() as i32;
-            let buf = build_search(search_seq_id, endian, response_addr, &channel_names_cids)?;
-            udp.send_buf(&buf);
+            let search_seq_id = udp.increment_search_seq_id();
+            let buf_packet =
+                build_search(search_seq_id, endian, response_addr, &channel_names_cids)?;
+            buf.push(buf_packet);
+        }
+
+        for buf_packet in buf {
+            udp.send_buf(&buf_packet, true).await;
         }
 
         Ok(())

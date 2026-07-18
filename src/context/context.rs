@@ -1,5 +1,8 @@
 use super::log::init_log;
 use crate::env::env::Env;
+use crate::pva_channel::pva_channel::PvaChannel;
+use crate::pva_channel::pva_channels;
+use crate::pva_channel::pva_channels::PvaChannels;
 use crate::udp::udp::UDP;
 use ::log::LevelFilter;
 use ::log::error;
@@ -25,6 +28,7 @@ pub struct Context {
     udp: Arc<UDP>,
     ca_tcps: Arc<TCPs>,
     ca_channels: Arc<CaChannels>,
+    pva_channels: Arc<PvaChannels>,
 }
 /**
  * Access point for the client runtime state. Can be accessed by calling
@@ -53,9 +57,11 @@ impl Context {
         init_log(log_level);
         let env = Env::new(user_env);
         let udp: Arc<UDP> = Arc::new(UDP::new(&env).await);
+        // start to listen CA and PVA messages in UDP
         Arc::clone(&udp).start_to_listen();
 
         let ca_channels = CaChannels::new();
+        let pva_channels = PvaChannels::new();
         let ca_tcps = TCPs::new();
 
         let context = Context {
@@ -63,6 +69,7 @@ impl Context {
             udp: Arc::clone(&udp),
             ca_tcps: Arc::new(ca_tcps),
             ca_channels: Arc::new(ca_channels),
+            pva_channels: Arc::new(pva_channels)
         };
 
         info!(
@@ -87,8 +94,23 @@ impl Context {
         channels.create_channels(names)
     }
 
-    pub fn start_search_ca(self: &Self) {
+    pub fn create_pva_channel(self: &Self, name: &str) -> Arc<PvaChannel> {
+        let channels = self.pva_channels();
+        channels.create_channel(name)
+    }
+
+    pub fn create_pva_channels(self: &Self, names: Vec<String>) {
+        let channels = self.pva_channels();
+        channels.create_channels(names)
+    }
+
+    /**
+     * Start to search both CA and PVA channels
+     */
+    pub fn start_search(self: &Self) {
         let channels = self.ca_channels();
+        channels.start_search();
+        let channels = self.pva_channels();
         channels.start_search();
     }
 
@@ -112,6 +134,10 @@ impl Context {
 
     pub fn ca_channels(self: &Self) -> Arc<CaChannels> {
         Arc::clone(&self.ca_channels)
+    }
+
+    pub fn pva_channels(self: &Self) -> Arc<PvaChannels> {
+        Arc::clone(&self.pva_channels)
     }
 
     pub fn tcps(self: &Self) -> Arc<TCPs> {

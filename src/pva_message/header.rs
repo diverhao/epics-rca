@@ -20,7 +20,7 @@ pub enum MsgSeg {
 }
 
 #[derive(Copy, Clone, Debug, Eq, PartialEq)]
-pub enum MsgSrc {
+pub enum MsgOrigin {
     Client, // bit 6 = 0
     Server, // bit 6 = 1
 }
@@ -35,7 +35,7 @@ pub enum MsgEndian {
 pub struct MsgFlags {
     pub msg_type: MsgType,
     pub seg_type: MsgSeg,
-    pub src: MsgSrc,
+    pub origin: MsgOrigin,
     pub endian: MsgEndian,
 }
 
@@ -53,9 +53,9 @@ impl MsgFlags {
             MsgSeg::LastOfSeg => 0x20,
         };
 
-        let src = match self.src {
-            MsgSrc::Client => 0x00,
-            MsgSrc::Server => 0x40,
+        let origin = match self.origin {
+            MsgOrigin::Client => 0x00,
+            MsgOrigin::Server => 0x40,
         };
 
         let endian = match self.endian {
@@ -63,7 +63,7 @@ impl MsgFlags {
             MsgEndian::Big => 0x80,
         };
 
-        msg_type | seg_type | src | endian
+        msg_type | seg_type | origin | endian
     }
 
     pub fn from_u8(value: u8) -> Option<Self> {
@@ -85,10 +85,10 @@ impl MsgFlags {
             _ => unreachable!(),
         };
 
-        let src = if value & 0x40 == 0 {
-            MsgSrc::Client
+        let origin = if value & 0x40 == 0 {
+            MsgOrigin::Client
         } else {
-            MsgSrc::Server
+            MsgOrigin::Server
         };
 
         let endian = if value & 0x80 == 0 {
@@ -100,7 +100,7 @@ impl MsgFlags {
         Some(Self {
             msg_type,
             seg_type,
-            src,
+            origin,
             endian,
         })
     }
@@ -118,16 +118,16 @@ pub struct PvaHeader {
     version: u8,
     flags: MsgFlags,
     cmd: PvaCmd,
-    payload_size: i32,
+    payload_size: u32,
 }
 
 impl PvaHeader {
     pub fn new(
         seg_type: MsgSeg,
-        src: MsgSrc,
+        origin: MsgOrigin,
         endian: MsgEndian,
         cmd: PvaCmd,
-        payload_size: i32,
+        payload_size: u32,
     ) -> Result<Self, String> {
         let header = Self {
             magic: PVA_MAGIC,
@@ -135,7 +135,7 @@ impl PvaHeader {
             flags: MsgFlags {
                 msg_type: MsgType::Application,
                 seg_type,
-                src,
+                origin,
                 endian,
             },
             cmd,
@@ -161,7 +161,7 @@ impl PvaHeader {
         self.cmd
     }
 
-    pub fn payload_size(&self) -> i32 {
+    pub fn payload_size(&self) -> u32 {
         self.payload_size
     }
 
@@ -204,7 +204,7 @@ impl PvaHeader {
 
         let cmd = PvaCmd::from_u8(buf[3])
             .ok_or_else(|| String::from("Error: Invalid PVA application command"))?;
-        let payload_size = decode_i32(&buf[4..8], flags.endian);
+        let payload_size = decode_u32(&buf[4..8], flags.endian);
         let header = Self {
             magic,
             version,
@@ -225,18 +225,23 @@ pub struct PvaCtrlHeader {
     version: u8,
     flags: MsgFlags,
     cmd: PvaCtrlCmd,
-    data: i32,
+    data: u32,
 }
 
 impl PvaCtrlHeader {
-    pub fn new(src: MsgSrc, endian: MsgEndian, cmd: PvaCtrlCmd, data: i32) -> Result<Self, String> {
+    pub fn new(
+        origin: MsgOrigin,
+        endian: MsgEndian,
+        cmd: PvaCtrlCmd,
+        data: u32,
+    ) -> Result<Self, String> {
         let header = Self {
             magic: PVA_MAGIC,
             version: PVA_VERSION,
             flags: MsgFlags {
                 msg_type: MsgType::Control,
                 seg_type: MsgSeg::NotSeg,
-                src,
+                origin,
                 endian,
             },
             cmd,
@@ -262,7 +267,7 @@ impl PvaCtrlHeader {
         self.cmd
     }
 
-    pub fn data(&self) -> i32 {
+    pub fn data(&self) -> u32 {
         self.data
     }
 
@@ -303,7 +308,7 @@ impl PvaCtrlHeader {
 
         let cmd = PvaCtrlCmd::from_u8(buf[3])
             .ok_or_else(|| String::from("Error: Invalid PVA control command"))?;
-        let data = decode_i32(&buf[4..8], flags.endian);
+        let data = decode_u32(&buf[4..8], flags.endian);
         let header = Self {
             magic,
             version,
@@ -345,15 +350,15 @@ fn decode_header_prefix(buf: &[u8]) -> Result<(u8, u8, MsgFlags), String> {
     Ok((magic, version, flags))
 }
 
-fn decode_i32(buf: &[u8], endian: MsgEndian) -> i32 {
+fn decode_u32(buf: &[u8], endian: MsgEndian) -> u32 {
     let bytes = [buf[0], buf[1], buf[2], buf[3]];
     match endian {
-        MsgEndian::Little => i32::from_le_bytes(bytes),
-        MsgEndian::Big => i32::from_be_bytes(bytes),
+        MsgEndian::Little => u32::from_le_bytes(bytes),
+        MsgEndian::Big => u32::from_be_bytes(bytes),
     }
 }
 
-fn encode_header(magic: u8, version: u8, flags: MsgFlags, cmd: u8, value: i32) -> Vec<u8> {
+fn encode_header(magic: u8, version: u8, flags: MsgFlags, cmd: u8, value: u32) -> Vec<u8> {
     let mut buf = Vec::with_capacity(PVA_HEADER_SIZE);
     buf.push(magic);
     buf.push(version);
