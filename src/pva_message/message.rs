@@ -1,4 +1,6 @@
 use core::num;
+use std::collections::HashMap;
+use std::fmt;
 use std::net::{IpAddr, SocketAddr};
 use std::sync::Arc;
 
@@ -45,6 +47,60 @@ const MAX_TCP_RECV: usize = 0x10000;
 pub struct PvaMsg {
     header: PvaHeader,
     payload: Vec<u8>,
+}
+
+impl fmt::Display for PvaMsg {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let flags = self.header.flags();
+
+        writeln!(f, "\nHeader:")?;
+        writeln!(f, "  {:<14}: 0x{:02x}", "Magic", self.header.magic())?;
+        writeln!(f, "  {:<14}: {}", "Version", self.header.version())?;
+        writeln!(f, "  {:<14}: {:?}", "Message Type", flags.msg_type)?;
+        writeln!(f, "  {:<14}: {:?}", "Segmentation", flags.seg_type)?;
+        writeln!(f, "  {:<14}: {:?}", "Source", flags.src)?;
+        writeln!(f, "  {:<14}: {:?}", "Endian", flags.endian)?;
+        writeln!(f, "  {:<14}: {}", "Command", self.header.cmd())?;
+        writeln!(
+            f,
+            "  {:<14}: {}",
+            "Payload Size",
+            self.header.payload_size()
+        )?;
+
+        let payload_len = self.payload.len();
+        let show_len = payload_len.min(80);
+        writeln!(f, "Payload: {payload_len} bytes, showing {show_len}")?;
+
+        for (line, chunk) in self.payload[..show_len].chunks(16).enumerate() {
+            write!(f, "  {:04x}  ", line * 16)?;
+
+            for i in 0..16 {
+                if let Some(byte) = chunk.get(i) {
+                    write!(f, "{byte:02x} ")?;
+                } else {
+                    write!(f, "   ")?;
+                }
+
+                if i == 7 {
+                    write!(f, " ")?;
+                }
+            }
+
+            write!(f, " ")?;
+            for byte in chunk {
+                let ch = if byte.is_ascii_graphic() || *byte == b' ' {
+                    *byte as char
+                } else {
+                    '.'
+                };
+                write!(f, "{ch}")?;
+            }
+            writeln!(f)?;
+        }
+
+        Ok(())
+    }
 }
 
 impl PvaMsg {
@@ -175,6 +231,89 @@ impl PvaCtrlMsg {
     }
 }
 
+pub fn build_connection_validation(
+    authnz: PvaAuthnz,
+    endian: MsgEndian,
+    pva_type_registry: &mut PvaTypeRegistry,
+) -> Result<Vec<u8>, String> {
+    // struct connectionValidationResponse {
+    //     int clientReceiveBufferSize;
+    //     short clientIntrospectionRegistryMaxSize;
+    //     short connectionQos;
+    //     string authNZ;
+    //     FieldDesc dataIF;
+    //     PVField data;
+    // };
+
+    // payload buf
+    let mut buf: Vec<u8> = vec![];
+
+    // maximum TCP receive buffer size
+    let tcp_buf_size: i32 = MAX_TCP_RECV as i32;
+    tcp_buf_size.to_buf(&PvaType::Int, &mut buf, endian)?;
+
+    // introspection registry size
+    let type_registry_size: i16 = 0x7fff;
+    type_registry_size.to_buf(&PvaType::Short, &mut buf, endian)?;
+
+    // quality of service priority, 0
+    let qos: i16 = 0;
+    qos.to_buf(&PvaType::Short, &mut buf, endian)?;
+
+    // authentication, "ca" or "anonymous"
+    match authnz {
+        PvaAuthnz::Anonymous => {
+            "anonymous"
+                .to_string()
+                .to_buf(&PvaType::String, &mut buf, endian)?;
+            PvaType::Null.to_buf(&mut buf, endian, pva_type_registry)?;
+        }
+        PvaAuthnz::Ca => {
+            "ca".to_string()
+                .to_buf(&PvaType::String, &mut buf, endian)?;
+            // append type
+            let typ = Arc::new(PvaType::Struct(Arc::new(PvaStructType {
+                id: "structure".to_string(),
+                fields: vec![
+                    Arc::new(PvaFieldType {
+                        name: "user".to_string(),
+                        typ: Arc::new(PvaType::String),
+                    }),
+                    Arc::new(PvaFieldType {
+                        name: "host".to_string(),
+                        typ: Arc::new(PvaType::String),
+                    }),
+                ],
+            })));
+
+            let username = std::env::var("USER")
+                .or_else(|_| std::env::var("USERNAME"))
+                .unwrap_or_else(|_| "nobody".to_string());
+            let hostname_bytes = current_hostname_bytes();
+            let hostname = if hostname_bytes.is_empty() {
+                "invalidhost.".to_string()
+            } else {
+                String::from_utf8_lossy(&hostname_bytes).into_owned()
+            };
+            let value = PvaValue::Struct(PvaStructValue {
+                fields: vec![PvaValue::String(username), PvaValue::String(hostname)],
+            });
+
+            typ.to_buf(&mut buf, endian, pva_type_registry)?;
+            value.to_buf(typ, &mut buf, endian, pva_type_registry)?;
+        }
+    }
+
+    PvaMsg::new(
+        MsgSeg::NotSeg,
+        MsgSrc::Client,
+        endian,
+        PvaCmd::ConnectionValidation,
+        buf,
+    )?
+    .to_buf()
+}
+
 pub fn build_echo(endian: MsgEndian) -> Result<Vec<u8>, String> {
     // no size
     // struct echoRequest {
@@ -188,13 +327,17 @@ pub fn build_search(
     search_seq_id: i32,
     endian: MsgEndian,
     response_addr: SocketAddr,
-    channel_names_cids: Vec<(String, i32)>,
-    pva_type_registry: &mut PvaTypeRegistry,
+    channel_names_cids: &Vec<(String, i32)>,
 ) -> Result<Vec<u8>, String> {
     // reject 0-size channel search
     if channel_names_cids.len() == 0 {
         return Err("Cannot build 0 size PVA search buffer".to_string());
     }
+
+    // this is a udp packet, no type registry
+    let pva_type_registry: &mut PvaTypeRegistry = &mut PvaTypeRegistry {
+        types: HashMap::new(),
+    };
 
     // payload
     // struct searchRequest {
@@ -288,7 +431,7 @@ pub fn build_search(
     // name struct values, they are not PVA structure variable size array!
     for (name, cid) in channel_names_cids {
         let struct_value = PvaStructValue {
-            fields: vec![PvaValue::Int(cid), PvaValue::String(name)],
+            fields: vec![PvaValue::Int(*cid), PvaValue::String(name.clone())],
         };
         PvaValue::Struct(struct_value).to_buf(
             Arc::clone(&struct_typ),
@@ -317,89 +460,6 @@ pub fn build_search(
     let mut header_buf = header.to_buf()?;
     header_buf.extend_from_slice(&buf);
     return Ok(header_buf);
-}
-
-pub fn build_connection_validation(
-    authnz: PvaAuthnz,
-    endian: MsgEndian,
-    pva_type_registry: &mut PvaTypeRegistry,
-) -> Result<Vec<u8>, String> {
-    // struct connectionValidationResponse {
-    //     int clientReceiveBufferSize;
-    //     short clientIntrospectionRegistryMaxSize;
-    //     short connectionQos;
-    //     string authNZ;
-    //     FieldDesc dataIF;
-    //     PVField data;
-    // };
-
-    // payload buf
-    let mut buf: Vec<u8> = vec![];
-
-    // maximum TCP receive buffer size
-    let tcp_buf_size: i32 = MAX_TCP_RECV as i32;
-    tcp_buf_size.to_buf(&PvaType::Int, &mut buf, endian)?;
-
-    // introspection registry size
-    let type_registry_size: i16 = 0x7fff;
-    type_registry_size.to_buf(&PvaType::Short, &mut buf, endian)?;
-
-    // quality of service priority, 0
-    let qos: i16 = 0;
-    qos.to_buf(&PvaType::Short, &mut buf, endian)?;
-
-    // authentication, "ca" or "anonymous"
-    match authnz {
-        PvaAuthnz::Anonymous => {
-            "anonymous"
-                .to_string()
-                .to_buf(&PvaType::String, &mut buf, endian)?;
-            PvaType::Null.to_buf(&mut buf, endian, pva_type_registry)?;
-        }
-        PvaAuthnz::Ca => {
-            "ca".to_string()
-                .to_buf(&PvaType::String, &mut buf, endian)?;
-            // append type
-            let typ = Arc::new(PvaType::Struct(Arc::new(PvaStructType {
-                id: "structure".to_string(),
-                fields: vec![
-                    Arc::new(PvaFieldType {
-                        name: "user".to_string(),
-                        typ: Arc::new(PvaType::String),
-                    }),
-                    Arc::new(PvaFieldType {
-                        name: "host".to_string(),
-                        typ: Arc::new(PvaType::String),
-                    }),
-                ],
-            })));
-
-            let username = std::env::var("USER")
-                .or_else(|_| std::env::var("USERNAME"))
-                .unwrap_or_else(|_| "nobody".to_string());
-            let hostname_bytes = current_hostname_bytes();
-            let hostname = if hostname_bytes.is_empty() {
-                "invalidhost.".to_string()
-            } else {
-                String::from_utf8_lossy(&hostname_bytes).into_owned()
-            };
-            let value = PvaValue::Struct(PvaStructValue {
-                fields: vec![PvaValue::String(username), PvaValue::String(hostname)],
-            });
-
-            typ.to_buf(&mut buf, endian, pva_type_registry)?;
-            value.to_buf(typ, &mut buf, endian, pva_type_registry)?;
-        }
-    }
-
-    PvaMsg::new(
-        MsgSeg::NotSeg,
-        MsgSrc::Client,
-        endian,
-        PvaCmd::ConnectionValidation,
-        buf,
-    )?
-    .to_buf()
 }
 
 pub fn build_create_channel(
@@ -1136,7 +1196,6 @@ pub fn build_cancel_request(sid: i32, ioid: i32, endian: MsgEndian) -> Result<Ve
 }
 
 // CMD_ORIGIN_TAG (0x16), not implement in epics-rca
-
 
 // Mark Total Byte Sent (0x00), not used
 

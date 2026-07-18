@@ -9,6 +9,8 @@ use ::log::error;
 use ::log::info;
 use core::net::SocketAddr;
 use std::char::MAX;
+use std::sync::atomic::AtomicU32;
+use std::sync::atomic::Ordering;
 use std::sync::{Arc, RwLock, RwLockReadGuard, RwLockWriteGuard};
 use tokio::net::UdpSocket;
 
@@ -17,6 +19,7 @@ pub struct UDP {
     socket_v6: Arc<UdpSocket>,
     ca_addr_list: Vec<SocketAddr>,
     pva_addr_list: Vec<SocketAddr>,
+    search_seq_id: AtomicU32,
 }
 
 impl UDP {
@@ -56,6 +59,7 @@ impl UDP {
             socket_v6,
             ca_addr_list,
             pva_addr_list,
+            search_seq_id: AtomicU32::new(0)
         }
     }
 
@@ -166,4 +170,16 @@ impl UDP {
     pub fn pva_addr_list(self: &Self) -> &Vec<SocketAddr> {
         &self.pva_addr_list
     }
+
+    pub fn search_seq_id(&self) -> u32 {
+        self.search_seq_id.load(Ordering::Relaxed)
+    }
+
+
+    // ---------------- setter ---------------------
+
+    pub fn increment_search_seq_id(&self) -> u32 {
+        self.search_seq_id.fetch_add(1, Ordering::Relaxed) + 1
+    }
+
 }

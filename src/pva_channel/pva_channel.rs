@@ -15,26 +15,26 @@ use tokio::time::timeout;
 // channel monitor callback function
 // pub type ChannelCallback = Arc<dyn Fn(u32, DbrType, u32, &DbrData) + Send + Sync + 'static>;
 
-pub struct CaChannel {
+pub struct PvaChannel {
     // fixed, never change
     name: String,
     cid: u32, // client ID
     // dynamic data
     // from server, sid, access right, data count, data type,
     // search: state, server address
-    // meta: RwLock<PvaMeta>,
+    meta: RwLock<PvaMeta>,
     search_counter: AtomicU32,
     // state_change_notifier: Notify,
     // monitor: RwLock<PvaMonitor>,
 }
 
-impl CaChannel {
+impl PvaChannel {
     pub fn new(name: &str, cid: u32) -> Self {
-        CaChannel {
+        PvaChannel {
             name: name.to_string(),
             cid: cid,
             search_counter: AtomicU32::new(1),
-            // meta: RwLock::new(PvaMeta::new()),
+            meta: RwLock::new(PvaMeta::new()),
             // state_change_notifier: Notify::new(),
             // monitor: RwLock::new(CaMonitor::new()),
         }
@@ -368,13 +368,13 @@ impl CaChannel {
         &self.name
     }
 
-    // pub fn meta(&self) -> RwLockReadGuard<'_, CaMeta> {
-    //     self.meta.read().unwrap()
-    // }
+    pub fn meta(&self) -> RwLockReadGuard<'_, PvaMeta> {
+        self.meta.read().unwrap()
+    }
 
-    // pub fn meta_mut(&self) -> RwLockWriteGuard<'_, CaMeta> {
-    //     self.meta.write().unwrap()
-    // }
+    pub fn meta_mut(&self) -> RwLockWriteGuard<'_, PvaMeta> {
+        self.meta.write().unwrap()
+    }
 
     // pub fn monitor(self: &Self) -> RwLockReadGuard<'_, CaMonitor> {
     //     self.monitor.read().unwrap()
@@ -426,7 +426,7 @@ impl CaChannel {
     // }
 }
 
-// impl std::fmt::Display for CaChannel {
+// impl std::fmt::Display for PvaChannel {
 //     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
 //         let meta = self.meta().to_string().replace('\n', "\n    ");
 //         let monitor = self.monitor().to_string().replace('\n', "\n    ");
