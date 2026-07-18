@@ -34,8 +34,10 @@ async fn main() {
         vec![
             ("EPICS_CA_ADDR_LIST", "127.0.0.1"),
             ("EPICS_CA_AUTO_ADDR_LIST", "NO"),
+            ("EPICS_PVA_ADDR_LIST", "127.0.0.1"),
+            ("EPICS_PVA_AUTO_ADDR_LIST", "NO"),
         ],
-        LevelFilter::Error,
+        LevelFilter::Debug,
     )
     .await;
 
@@ -183,23 +185,23 @@ async fn main() {
 
     // print_alloc_stats("after-create-loop");
 
-    // let mut alloc_report_interval = time::interval(Duration::from_secs(5));
-    // let ctrl_c = tokio::signal::ctrl_c();
-    // tokio::pin!(ctrl_c);
+    let mut alloc_report_interval = time::interval(Duration::from_secs(5));
+    let ctrl_c = tokio::signal::ctrl_c();
+    tokio::pin!(ctrl_c);
 
-    // loop {
-    //     tokio::select! {
-    //         _ = alloc_report_interval.tick() => {
-    //             print_alloc_stats("periodic");
-    //         }
-    //         result = &mut ctrl_c => {
-    //             result.expect("failed to listen for Ctrl-C");
-    //             break;
-    //         }
-    //     }
-    // }
+    loop {
+        tokio::select! {
+            _ = alloc_report_interval.tick() => {
+                print_alloc_stats("periodic");
+            }
+            result = &mut ctrl_c => {
+                result.expect("failed to listen for Ctrl-C");
+                break;
+            }
+        }
+    }
 
-    // print_alloc_stats("final");
+    print_alloc_stats("final");
 }
 
 fn print_alloc_stats(label: &str) {

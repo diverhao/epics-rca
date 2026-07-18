@@ -1,6 +1,6 @@
 use crate::ca_channel;
 use crate::ca_message::message::CaMsg;
-use crate::ca_message::message_handler::handle_tcp_msgs;
+use crate::ca_message::message_handler::handle_tcp_ca_msgs;
 use crate::context::context::get_context;
 use crate::pva_message::typ::PvaType;
 use crate::pva_message::type_registry::PvaTypeRegistry;
@@ -202,7 +202,7 @@ impl TCP {
                         let msgs =
                             CaMsg::from_buf(&mut buf, Some(tcp.addr().clone()), vec![], true);
                         let src = *tcp.addr();
-                        if !handle_tcp_msgs(&src, msgs) {
+                        if !handle_tcp_ca_msgs(&src, msgs) {
                             buf.clear();
                         }
                     }

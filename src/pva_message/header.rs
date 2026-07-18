@@ -173,12 +173,6 @@ impl PvaHeader {
                 "Error: PVA application header has the control-message flag set",
             ));
         }
-        if self.payload_size < 0 {
-            return Err(format!(
-                "Error: PVA application payload size cannot be negative: {}",
-                self.payload_size
-            ));
-        }
 
         Ok(())
     }
