@@ -69,7 +69,7 @@ impl Context {
             udp: Arc::clone(&udp),
             ca_tcps: Arc::new(ca_tcps),
             ca_channels: Arc::new(ca_channels),
-            pva_channels: Arc::new(pva_channels)
+            pva_channels: Arc::new(pva_channels),
         };
 
         info!(
@@ -140,7 +140,11 @@ impl Context {
         Arc::clone(&self.pva_channels)
     }
 
-    pub fn tcps(self: &Self) -> Arc<TCPs> {
+    pub fn ca_tcps(self: &Self) -> Arc<TCPs> {
+        Arc::clone(&self.ca_tcps)
+    }
+
+    pub fn pva_tcps(self: &Self) -> Arc<TCPs> {
         Arc::clone(&self.ca_tcps)
     }
 }

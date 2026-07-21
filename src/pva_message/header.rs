@@ -1,4 +1,6 @@
-use crate::pva_message::cmd::{PvaCmd, PvaCtrlCmd};
+use std::fmt;
+
+use crate::pva_message::cmd::PvaCmd;
 
 const PVA_MAGIC: u8 = 0xca;
 const PVA_VERSION: u8 = 0x02;
@@ -29,6 +31,15 @@ pub enum MsgOrigin {
 pub enum MsgEndian {
     Little, // bit 7 = 0
     Big,    // bit 7 = 1
+}
+
+impl fmt::Display for MsgEndian {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::Little => write!(f, "Little Endian"),
+            Self::Big => write!(f, "Big Endian"),
+        }
+    }
 }
 
 #[derive(Copy, Clone, Debug, Eq, PartialEq)]
@@ -110,7 +121,7 @@ impl MsgFlags {
     }
 }
 
-// --------------- application header ----------------
+// --------------- protocol header ----------------
 
 #[derive(Copy, Clone, Debug, Eq, PartialEq)]
 pub struct PvaHeader {
@@ -145,6 +156,30 @@ impl PvaHeader {
         Ok(header)
     }
 
+    /**
+     * Build the server-to-client `SET_ENDIANESS` control header.
+     *
+     * Control messages have no payload. `data` occupies the header's final
+     * four bytes and must be either `0` (fixed connection byte order) or
+     * `u32::MAX` (byte order selected by each subsequent message header).
+     */
+    pub fn new_set_byte_order(endian: MsgEndian, data: u32) -> Result<Self, String> {
+        let header = Self {
+            magic: PVA_MAGIC,
+            version: PVA_VERSION,
+            flags: MsgFlags {
+                msg_type: MsgType::Control,
+                seg_type: MsgSeg::NotSeg,
+                origin: MsgOrigin::Server,
+                endian,
+            },
+            cmd: PvaCmd::SetEndianess,
+            payload_size: data,
+        };
+        header.validate()?;
+        Ok(header)
+    }
+
     pub fn magic(&self) -> u8 {
         self.magic
     }
@@ -161,17 +196,63 @@ impl PvaHeader {
         self.cmd
     }
 
+    /**
+     * Return true when this is the `SET_ENDIANESS` control message.
+     */
+    pub fn is_set_byte_order(&self) -> bool {
+        self.flags.msg_type == MsgType::Control && self.cmd == PvaCmd::SetEndianess
+    }
+
+    /**
+     * Return the control-specific value from a `SET_ENDIANESS` header.
+     */
+    pub fn set_byte_order_data(&self) -> Option<u32> {
+        self.is_set_byte_order().then_some(self.payload_size)
+    }
+
     pub fn payload_size(&self) -> u32 {
-        self.payload_size
+        if self.flags.msg_type == MsgType::Application {
+            self.payload_size
+        } else {
+            0
+        }
     }
 
     pub fn validate(&self) -> Result<(), String> {
         validate_common_header(self.magic, self.version)?;
 
-        if self.flags.msg_type != MsgType::Application {
-            return Err(String::from(
-                "Error: PVA application header has the control-message flag set",
-            ));
+        match self.flags.msg_type {
+            MsgType::Application if self.cmd == PvaCmd::SetEndianess => {
+                return Err(String::from(
+                    "Error: PVA SET_ENDIANESS must have the control-message flag set",
+                ));
+            }
+            MsgType::Application => {}
+            MsgType::Control => {
+                if !self.is_set_byte_order() {
+                    return Err(String::from(
+                        "Error: Unsupported PVA control command; expected SET_ENDIANESS (0x02)",
+                    ));
+                }
+            }
+        }
+
+        if self.flags.msg_type == MsgType::Control {
+            if self.flags.seg_type != MsgSeg::NotSeg {
+                return Err(String::from(
+                    "Error: PVA control message cannot be segmented",
+                ));
+            }
+            if self.flags.origin != MsgOrigin::Server {
+                return Err(String::from(
+                    "Error: PVA SET_ENDIANESS must be sent by the server",
+                ));
+            }
+            if self.payload_size != 0 && self.payload_size != u32::MAX {
+                return Err(String::from(
+                    "Error: PVA SET_ENDIANESS data must be 0 or 0xFFFFFFFF",
+                ));
+            }
         }
 
         Ok(())
@@ -190,14 +271,17 @@ impl PvaHeader {
 
     pub fn from_buf(buf: &[u8]) -> Result<Self, String> {
         let (magic, version, flags) = decode_header_prefix(buf)?;
-        if flags.msg_type != MsgType::Application {
-            return Err(String::from(
-                "Error: Expected a PVA application header, received a control header",
-            ));
-        }
-
-        let cmd = PvaCmd::from_u8(buf[3])
-            .ok_or_else(|| String::from("Error: Invalid PVA application command"))?;
+        let cmd = match flags.msg_type {
+            MsgType::Application => PvaCmd::from_u8(buf[3])
+                .ok_or_else(|| String::from("Error: Invalid PVA application command"))?,
+            MsgType::Control if buf[3] == 0x02 => PvaCmd::SetEndianess,
+            MsgType::Control => {
+                return Err(format!(
+                    "Error: Unsupported PVA control command 0x{:02X}",
+                    buf[3]
+                ));
+            }
+        };
         let payload_size = decode_u32(&buf[4..8], flags.endian);
         let header = Self {
             magic,
@@ -205,110 +289,6 @@ impl PvaHeader {
             flags,
             cmd,
             payload_size,
-        };
-        header.validate()?;
-        Ok(header)
-    }
-}
-
-// --------------- control header ----------------
-
-#[derive(Copy, Clone, Debug, Eq, PartialEq)]
-pub struct PvaCtrlHeader {
-    magic: u8,
-    version: u8,
-    flags: MsgFlags,
-    cmd: PvaCtrlCmd,
-    data: u32,
-}
-
-impl PvaCtrlHeader {
-    pub fn new(
-        origin: MsgOrigin,
-        endian: MsgEndian,
-        cmd: PvaCtrlCmd,
-        data: u32,
-    ) -> Result<Self, String> {
-        let header = Self {
-            magic: PVA_MAGIC,
-            version: PVA_VERSION,
-            flags: MsgFlags {
-                msg_type: MsgType::Control,
-                seg_type: MsgSeg::NotSeg,
-                origin,
-                endian,
-            },
-            cmd,
-            data,
-        };
-        header.validate()?;
-        Ok(header)
-    }
-
-    pub fn magic(&self) -> u8 {
-        self.magic
-    }
-
-    pub fn version(&self) -> u8 {
-        self.version
-    }
-
-    pub fn flags(&self) -> MsgFlags {
-        self.flags
-    }
-
-    pub fn cmd(&self) -> PvaCtrlCmd {
-        self.cmd
-    }
-
-    pub fn data(&self) -> u32 {
-        self.data
-    }
-
-    pub fn validate(&self) -> Result<(), String> {
-        validate_common_header(self.magic, self.version)?;
-
-        if self.flags.msg_type != MsgType::Control {
-            return Err(String::from(
-                "Error: PVA control header does not have the control-message flag set",
-            ));
-        }
-        if self.flags.seg_type != MsgSeg::NotSeg {
-            return Err(String::from(
-                "Error: PVA control message cannot be segmented",
-            ));
-        }
-        Ok(())
-    }
-
-    pub fn to_buf(&self) -> Result<Vec<u8>, String> {
-        self.validate()?;
-        Ok(encode_header(
-            self.magic,
-            self.version,
-            self.flags,
-            self.cmd.to_u8(),
-            self.data,
-        ))
-    }
-
-    pub fn from_buf(buf: &[u8]) -> Result<Self, String> {
-        let (magic, version, flags) = decode_header_prefix(buf)?;
-        if flags.msg_type != MsgType::Control {
-            return Err(String::from(
-                "Error: Expected a PVA control header, received an application header",
-            ));
-        }
-
-        let cmd = PvaCtrlCmd::from_u8(buf[3])
-            .ok_or_else(|| String::from("Error: Invalid PVA control command"))?;
-        let data = decode_u32(&buf[4..8], flags.endian);
-        let header = Self {
-            magic,
-            version,
-            flags,
-            cmd,
-            data,
         };
         header.validate()?;
         Ok(header)
@@ -363,4 +343,45 @@ fn encode_header(magic: u8, version: u8, flags: MsgFlags, cmd: u8, value: u32) -
         MsgEndian::Big => buf.extend_from_slice(&value.to_be_bytes()),
     }
     buf
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{MsgEndian, MsgOrigin, MsgType, PvaHeader, PVA_HEADER_SIZE};
+
+    #[test]
+    fn endian_display() {
+        assert_eq!(MsgEndian::Little.to_string(), "Little Endian");
+        assert_eq!(MsgEndian::Big.to_string(), "Big Endian");
+    }
+
+    #[test]
+    fn set_byte_order_header_round_trips() {
+        for (endian, data) in [
+            (MsgEndian::Little, 0),
+            (MsgEndian::Big, 0),
+            (MsgEndian::Little, u32::MAX),
+            (MsgEndian::Big, u32::MAX),
+        ] {
+            let header = PvaHeader::new_set_byte_order(endian, data).unwrap();
+            let buf = header.to_buf().unwrap();
+
+            assert_eq!(buf.len(), PVA_HEADER_SIZE);
+            assert_eq!(buf[3], 0x02);
+
+            let decoded = PvaHeader::from_buf(&buf).unwrap();
+            assert!(decoded.is_set_byte_order());
+            assert_eq!(decoded.cmd(), crate::pva_message::cmd::PvaCmd::SetEndianess);
+            assert_eq!(decoded.flags().msg_type, MsgType::Control);
+            assert_eq!(decoded.flags().origin, MsgOrigin::Server);
+            assert_eq!(decoded.flags().endian, endian);
+            assert_eq!(decoded.payload_size(), 0);
+            assert_eq!(decoded.set_byte_order_data(), Some(data));
+        }
+    }
+
+    #[test]
+    fn set_byte_order_rejects_other_control_data() {
+        assert!(PvaHeader::new_set_byte_order(MsgEndian::Big, 1).is_err());
+    }
 }

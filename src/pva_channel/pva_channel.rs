@@ -1,3 +1,4 @@
+use crate::ca_channel::dbr::ChannelState;
 use crate::context::context::get_context;
 use crate::pva_channel::pva_meta::PvaMeta;
 use crate::tcp::tcp::TCP;
@@ -48,46 +49,44 @@ impl PvaChannel {
      */
 
     pub async fn connect(self: &Self, addr: SocketAddr) {
-        // let state = self.state();
-        // // must be in NameFound state
-        // if state != ChannelState::NameFound {
-        //     error!("Channel must be in NameFound state to connect tcp");
-        //     return;
-        // }
+        let state = self.state();
+        // must be in NameFound state
+        if state != ChannelState::NameFound {
+            error!("Channel must be in NameFound state to connect tcp");
+            return;
+        }
 
-        // let cid = self.cid();
-        // let context = get_context();
-        // let tcps = context.tcps();
+        let cid = self.cid();
+        let context = get_context();
+        let tcps = context.pva_tcps();
 
-        // // create TCP (if not exist) or get TCP (if already exist)
-        // let tcp = tcps.create_tcp(addr).await;
+        // create TCP (if not exist) or get TCP (if already exist)
+        let tcp = tcps.create_pva_tcp(addr).await;
 
-        // // failed to create TCP: this TCP is automatically disgarded, then reconnect the channel
-        // let tcp = match tcp {
-        //     Ok(tcp) => tcp,
-        //     Err(_) => {
-        //         // The TCP is not created, simply reconnect
-        //         self.reconnect().await;
-        //         return;
-        //     }
-        // };
+        // failed to create TCP: this TCP is automatically disgarded, then reconnect the channel
+        let tcp = match tcp {
+            Ok(tcp) => tcp,
+            Err(_) => {
+                // The TCP is not created, simply reconnect
+                self.reconnect().await;
+                return;
+            }
+        };
 
-        // // During the creat_tcp().await, the channel may have been Destroyed,
-        // // or reconnected (in NameSearching state), ensure we are on the right track
-        // if self.state() != ChannelState::NameFound {
-        //     if tcp.cids().len() == 0 {
-        //         tcp.disconnect(true, true).await;
-        //     }
-        //     return;
-        // }
+        // During the creat_tcp().await, the channel may have been Destroyed,
+        // or reconnected (in NameSearching state), ensure we are on the right track
+        if self.state() != ChannelState::NameFound {
+            if tcp.cids().len() == 0 {
+                tcp.disconnect(true, true).await;
+            }
+            return;
+        }
 
-        // self.set_state(ChannelState::TcpConnected, true);
-        // // add this channel to TCP
-        // tcp.add_cid(cid);
-        // // assign TCP to this channel
-        // self.set_addr(Some(addr));
-        // // send handshake messages
-        // self.send_connect_chan();
+        self.set_state(ChannelState::TcpConnected, true);
+        // add this channel to TCP
+        tcp.add_cid(cid);
+        // assign TCP to this channel
+        self.set_addr(Some(addr));
     }
 
     pub fn send_connect_chan(self: &Self) {
@@ -97,7 +96,7 @@ impl PvaChannel {
         // };
 
         // let context = get_context();
-        // let tcp = match context.tcps().tcp(&dest) {
+        // let tcp = match context.pva_tcps().tcp(&dest) {
         //     Some(tcp) => tcp,
         //     None => return,
         // };
@@ -119,27 +118,28 @@ impl PvaChannel {
      * It does not destroy/disconnect the TCP
      */
     async fn destroy_chan(self: &Self, reconnect: bool) {
-        // debug!("Destroying the channel");
+        debug!("Destroying the channel");
 
-        // let context = get_context();
-        // let channels = context.ca_channels();
+        let context = get_context();
+        let channels = context.ca_channels();
 
-        // // Get current states for later use
-        // let addr: Option<SocketAddr> = self.addr();
-        // let sid = self.sid();
-        // let cid = self.cid();
+        // Get current states for later use
+        let addr: Option<SocketAddr> = self.addr();
+        let sid = self.sid();
+        let cid = self.cid();
+        // todo: monitor
         // let had_monitor = !(self.monitor().state() == MonitorState::NotRunning);
 
-        // // Reset all data, clear IO,
-        // self.reset();
+        // Reset all data, clear IO,
+        self.reset();
 
-        // if reconnect {
-        //     self.set_state(ChannelState::NameSearching, true);
-        // } else {
-        //     self.set_state(ChannelState::Destroyed, true);
-        // }
+        if reconnect {
+            self.set_state(ChannelState::NameSearching, true);
+        } else {
+            self.set_state(ChannelState::Destroyed, true);
+        }
 
-        // // Cancel monitor if there is one
+        // todo: Cancel monitor if there is one
         // if had_monitor {
         //     self.cancel_monitor(sid, cid, addr);
         //     if reconnect {
@@ -148,10 +148,10 @@ impl PvaChannel {
         //     }
         // }
 
-        // // send out CA_PROTO_CLEAR_CHANNEL, if TCP still exists in TCPs
+        // send out CA_PROTO_CLEAR_CHANNEL, if TCP still exists in TCPs
         // match addr {
         //     Some(addr) => {
-        //         let tcp = get_context().tcps().tcp(&addr);
+        //         let tcp = get_context().pva_tcps().tcp(&addr);
         //         match tcp {
         //             Some(tcp) => {
         //                 // Tell server to clear channel: Send CA_PROTO_CLEAR_CHANNEL
@@ -174,14 +174,14 @@ impl PvaChannel {
         //     None => {}
         // }
 
-        // // Clear addr.
-        // // todo: why? the reset already
-        // // self.set_addr(None);
+        // Clear addr.
+        // todo: why? the reset already
+        // self.set_addr(None);
 
-        // // Remove from Channels.by_cid.
-        // if !reconnect {
-        //     channels.remove_by_cid(self.cid());
-        // }
+        // Remove from Channels.by_cid.
+        if !reconnect {
+            channels.remove_by_cid(self.cid());
+        }
     }
 
     /**
@@ -192,7 +192,7 @@ impl PvaChannel {
      * It does not destroy/disconnect the TCP
      */
     pub async fn reconnect(self: &Self) {
-        // self.destroy_chan(true).await;
+        self.destroy_chan(true).await;
     }
 
     /**
@@ -203,7 +203,7 @@ impl PvaChannel {
      * It does not destroy/disconnect the TCP
      */
     pub async fn destroy(self: &Self) {
-        // self.destroy_chan(false).await;
+        self.destroy_chan(false).await;
     }
 
     /**
@@ -328,7 +328,7 @@ impl PvaChannel {
     //         };
 
     //         let msg = CaMsg::build_read_notify(data_type, data_count, sid, ioid, &vec![dest]);
-    //         let tcp: Arc<TCP> = match get_context().tcps().tcp(&dest) {
+    //         let tcp: Arc<TCP> = match get_context().pva_tcps().tcp(&dest) {
     //             Some(tcp) => tcp,
     //             None => return, // no such TCP, let TCP alive check handle it
     //         };
@@ -400,7 +400,7 @@ impl PvaChannel {
     //     let addr = self.addr();
     //     match addr {
     //         Some(addr) => {
-    //             let tcp = get_context().tcps().tcp(&addr);
+    //             let tcp = get_context().pva_tcps().tcp(&addr);
     //             match tcp {
     //                 Some(tcp) => Some(tcp),
     //                 None => None,

@@ -81,15 +81,15 @@ async fn main() {
     //             tcp_connected_count,
     //             created_count,
     //             get_context()
-    //                 .tcps()
+    //                 .ca_tcps()
     //                 .wait_connected_count
     //                 .load(Ordering::Relaxed),
     //             get_context()
-    //                 .tcps()
+    //                 .ca_tcps()
     //                 .already_connected_count
     //                 .load(Ordering::Relaxed),
     //             get_context()
-    //                 .tcps()
+    //                 .ca_tcps()
     //                 .self_connect_count
     //                 .load(Ordering::Relaxed)
     //         );
@@ -175,7 +175,7 @@ async fn main() {
     // context.create_ca_channel("val2afadsfsa");
     // println!("{}", context.ca_channels());
 
-    for ii in 0..1 {
+    for ii in 0..2 {
         let callback = Arc::clone(&callback1);
         let context = get_context().clone();
         let name = format!("val{}", ii);

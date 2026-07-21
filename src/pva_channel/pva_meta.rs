@@ -7,7 +7,7 @@ use crate::{
 
 pub struct PvaMeta {
     pub state: ChannelState,
-    // pub sid: u32, // server ID, assigned after channel created on server
+    pub sid: u32, // server ID, assigned after channel created on server
     pub addr: Option<SocketAddr>,
     // pub access_right: ChannelAccessRights,
     // pub data_type_native: DbrType,
@@ -18,7 +18,7 @@ impl PvaMeta {
     pub fn new() -> PvaMeta {
         PvaMeta {
             state: ChannelState::NameSearching,
-            // sid: 0,
+            sid: 0,
             addr: None,
             // access_right: ChannelAccessRights::None,
             // data_type_native: DbrType::Double,
@@ -32,9 +32,9 @@ impl PvaMeta {
         self.state
     }
 
-    // pub fn sid(&self) -> u32 {
-    //     self.sid
-    // }
+    pub fn sid(&self) -> u32 {
+        self.sid
+    }
 
     pub fn addr(&self) -> Option<SocketAddr> {
         self.addr
@@ -66,9 +66,9 @@ impl PvaMeta {
         self.state = new_state;
     }
 
-    // pub fn set_sid(&mut self, new_sid: u32) {
-    //     self.sid = new_sid;
-    // }
+    pub fn set_sid(&mut self, new_sid: u32) {
+        self.sid = new_sid;
+    }
 
     pub fn set_addr(&mut self, new_addr: Option<SocketAddr>) {
         self.addr = new_addr;
@@ -94,9 +94,9 @@ impl PvaChannel {
         self.meta().state()
     }
 
-    // pub fn sid(&self) -> u32 {
-    //     self.meta().sid()
-    // }
+    pub fn sid(&self) -> u32 {
+        self.meta().sid()
+    }
 
     pub fn addr(&self) -> Option<SocketAddr> {
         self.meta().addr()
@@ -141,9 +141,9 @@ impl PvaChannel {
         // }
     }
 
-    // pub fn set_sid(&self, new_sid: u32) {
-    //     self.meta_mut().set_sid(new_sid);
-    // }
+    pub fn set_sid(&self, new_sid: u32) {
+        self.meta_mut().set_sid(new_sid);
+    }
 
     pub fn set_addr(&self, new_addr: Option<SocketAddr>) {
         self.meta_mut().set_addr(new_addr);

@@ -1,5 +1,6 @@
 #[derive(Copy, Clone, Debug, Eq, PartialEq, Hash)]
 pub enum PvaCmd {
+    SetEndianess,         // control 0x02
     Beacon,               // 0x00
     ConnectionValidation, // 0x01
     Echo,                 // 0x02
@@ -28,6 +29,7 @@ pub enum PvaCmd {
 impl PvaCmd {
     pub fn to_u8(self) -> u8 {
         match self {
+            Self::SetEndianess => 0x02,
             Self::Beacon => 0x00,
             Self::ConnectionValidation => 0x01,
             Self::Echo => 0x02,
@@ -87,6 +89,7 @@ impl PvaCmd {
 impl std::fmt::Display for PvaCmd {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.write_str(match self {
+            Self::SetEndianess => "CMD_SET_ENDIANESS",
             Self::Beacon => "CMD_BEACON",
             Self::ConnectionValidation => "CMD_CONNECTION_VALIDATION",
             Self::Echo => "CMD_ECHO",
@@ -114,53 +117,15 @@ impl std::fmt::Display for PvaCmd {
     }
 }
 
-#[derive(Copy, Clone, Debug, Eq, PartialEq, Hash)]
-pub enum PvaCtrlCmd {
-    CtrlSetMarker, // 0x00
-    CtrlAckMarker, // 0x01
-    SetEndianess,  // 0x02
-}
-
-impl PvaCtrlCmd {
-    pub fn to_u8(self) -> u8 {
-        match self {
-            Self::CtrlSetMarker => 0x00,
-            Self::CtrlAckMarker => 0x01,
-            Self::SetEndianess => 0x02,
-        }
-    }
-
-    pub fn from_u8(value: u8) -> Option<Self> {
-        match value {
-            0x00 => Some(Self::CtrlSetMarker),
-            0x01 => Some(Self::CtrlAckMarker),
-            0x02 => Some(Self::SetEndianess),
-            _ => None,
-        }
-    }
-}
-
-impl std::fmt::Display for PvaCtrlCmd {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.write_str(match self {
-            Self::CtrlSetMarker => "CMD_SET_MARKER",
-            Self::CtrlAckMarker => "CMD_ACK_MARKER",
-            Self::SetEndianess => "CMD_SET_ENDIANESS",
-        })
-    }
-}
-
 #[cfg(test)]
 mod tests {
-    use super::{PvaCmd, PvaCtrlCmd};
+    use super::PvaCmd;
 
     #[test]
-    fn decodes_overlapping_application_and_control_commands() {
-        assert_eq!(PvaCmd::from_u8(0x00), Some(PvaCmd::Beacon));
-        assert_eq!(PvaCtrlCmd::from_u8(0x00), Some(PvaCtrlCmd::CtrlSetMarker));
-        assert_eq!(PvaCmd::from_u8(0x01), Some(PvaCmd::ConnectionValidation));
-        assert_eq!(PvaCtrlCmd::from_u8(0x01), Some(PvaCtrlCmd::CtrlAckMarker));
+    fn represents_overlapping_echo_and_set_endianess_commands() {
+        assert_eq!(PvaCmd::SetEndianess.to_u8(), 0x02);
+        assert_eq!(PvaCmd::Echo.to_u8(), 0x02);
+        // Without the control flag, 0x02 is the application CMD_ECHO command.
         assert_eq!(PvaCmd::from_u8(0x02), Some(PvaCmd::Echo));
-        assert_eq!(PvaCtrlCmd::from_u8(0x02), Some(PvaCtrlCmd::SetEndianess));
     }
 }

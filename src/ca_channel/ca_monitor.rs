@@ -250,13 +250,13 @@ impl CaChannel {
         let context = get_context();
 
         let msg: CaMsg = CaMsg::build_event_add(data_type, data_count, sid, subid, &vec![dest]);
-        let tcp = match context.tcps().tcp(&dest) {
+        let tcp = match context.ca_tcps().tcp(&dest) {
             Some(tcp) => tcp,
             None => return,
         };
 
         // tell server to start the monitor: send out CA_PROTO_EVENT_ADD
-        tcp.send_msgs(vec![msg]);
+        tcp.send_ca_msgs(vec![msg]);
 
         // .await {
         //     Ok(_) => {}
@@ -287,11 +287,11 @@ impl CaChannel {
             Some(dest) => {
                 let msg: CaMsg =
                     CaMsg::build_event_cancel(data_type, data_count, sid, subid, &vec![dest]);
-                let tcp: Option<Arc<crate::tcp::tcp::TCP>> = context.tcps().tcp(&dest);
+                let tcp: Option<Arc<crate::tcp::tcp::TCP>> = context.ca_tcps().tcp(&dest);
                 match tcp {
                     Some(tcp) => {
                         // tell server to release resource: send out CA_PROTO_EVENT_CANCEL
-                        tcp.send_msgs(vec![msg]);
+                        tcp.send_ca_msgs(vec![msg]);
                         // .await {
                         //     Ok(_) => {}
                         //     Err(error) => {}

@@ -12,13 +12,13 @@ use crate::pva_message::typ::PvaType;
 use crate::pva_message::type_registry::PvaTypeRegistry;
 use crate::pva_message::value::PvaValue;
 use crate::pva_message::{
-    cmd::{PvaCmd, PvaCtrlCmd},
-    header::{MsgEndian, MsgOrigin, MsgSeg, PVA_HEADER_SIZE, PvaCtrlHeader, PvaHeader},
+    cmd::PvaCmd,
+    header::{MsgEndian, MsgOrigin, MsgSeg, PVA_HEADER_SIZE, PvaHeader},
     primitive::PvaElement,
 };
 
 pub enum PvaStatus {
-    Ok,
+    Ok { msg: String, call_tree: String },
     Warning { msg: String, call_tree: String },
     Error { msg: String, call_tree: String },
     Fatal { msg: String, call_tree: String },
@@ -27,10 +27,117 @@ pub enum PvaStatus {
 impl PvaStatus {
     pub fn is_success(self: &Self) -> bool {
         match self {
-            PvaStatus::Ok => true,
+            PvaStatus::Ok { msg, call_tree } => true,
             PvaStatus::Warning { msg, call_tree } => true,
             _ => false,
         }
+    }
+
+    pub fn from_buf(
+        buf: &[u8],
+        offset: &mut usize,
+        endian: MsgEndian,
+        registry: &mut PvaTypeRegistry,
+    ) -> Result<PvaStatus, String> {
+        // struct Status {
+        //     byte type;      // enum { OK = 0, WARNING = 1, ERROR = 2, FATAL = 3 }
+        //     string message;
+        //     string callTree;   // optional (provides more context data about the error), can be empty
+        // };
+
+        let typ_num =
+            match PvaValue::from_buf(Arc::new(PvaType::UByte), buf, offset, endian, registry)? {
+                PvaValue::UByte(typ_num) => typ_num,
+                _ => return Err("".to_string()),
+            };
+
+        if typ_num == 0xff {
+            return Ok(PvaStatus::Ok {
+                msg: "".to_string(),
+                call_tree: "".to_string(),
+            });
+        }
+
+        let msg =
+            match PvaValue::from_buf(Arc::new(PvaType::String), buf, offset, endian, registry)? {
+                PvaValue::String(msg) => msg,
+                _ => return Err("".to_string()),
+            };
+
+        let call_tree =
+            match PvaValue::from_buf(Arc::new(PvaType::String), buf, offset, endian, registry)? {
+                PvaValue::String(call_tree) => call_tree,
+                _ => return Err("".to_string()),
+            };
+
+        if typ_num == 0 {
+            return Ok(PvaStatus::Ok { msg, call_tree });
+        } else if typ_num == 1 {
+            return Ok(PvaStatus::Error { msg, call_tree });
+        } else if typ_num == 2 {
+            return Ok(PvaStatus::Error { msg, call_tree });
+        } else if typ_num == 3 {
+            return Ok(PvaStatus::Fatal { msg, call_tree });
+        } else {
+            return Err("Failed to parse Pva Status".to_string());
+        }
+    }
+
+    pub fn to_buf(self: &Self, endian: MsgEndian) -> Result<Vec<u8>, String> {
+        let mut buf: Vec<u8> = vec![];
+        match self {
+            PvaStatus::Ok { msg, call_tree } => {
+                if msg.len() == 0 && call_tree.len() == 0 {
+                    // special case
+                    let typ_num: u8 = 0xff;
+                    typ_num.to_buf(&PvaType::UByte, &mut buf, endian)?;
+                } else {
+                    let typ_num: u8 = 0;
+                    typ_num.to_buf(&PvaType::UByte, &mut buf, endian)?;
+                    msg.to_buf(&PvaType::String, &mut buf, endian)?;
+                    call_tree.to_buf(&PvaType::String, &mut buf, endian)?;
+                }
+            }
+            PvaStatus::Warning { msg, call_tree } => {
+                let typ_num: u8 = 1;
+                typ_num.to_buf(&PvaType::UByte, &mut buf, endian)?;
+                msg.to_buf(&PvaType::String, &mut buf, endian)?;
+                call_tree.to_buf(&PvaType::String, &mut buf, endian)?;
+            }
+            PvaStatus::Error { msg, call_tree } => {
+                let typ_num: u8 = 2;
+                typ_num.to_buf(&PvaType::UByte, &mut buf, endian)?;
+                msg.to_buf(&PvaType::String, &mut buf, endian)?;
+                call_tree.to_buf(&PvaType::String, &mut buf, endian)?;
+            }
+            PvaStatus::Fatal { msg, call_tree } => {
+                let typ_num: u8 = 3;
+                typ_num.to_buf(&PvaType::UByte, &mut buf, endian)?;
+                msg.to_buf(&PvaType::String, &mut buf, endian)?;
+                call_tree.to_buf(&PvaType::String, &mut buf, endian)?;
+            }
+        }
+        Ok(buf)
+    }
+}
+
+impl fmt::Display for PvaStatus {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let (severity, msg, call_tree) = match self {
+            PvaStatus::Ok { msg, call_tree } => ("OK", msg, call_tree),
+            PvaStatus::Warning { msg, call_tree } => ("WARNING", msg, call_tree),
+            PvaStatus::Error { msg, call_tree } => ("ERROR", msg, call_tree),
+            PvaStatus::Fatal { msg, call_tree } => ("FATAL", msg, call_tree),
+        };
+
+        f.write_str(severity)?;
+        if !msg.is_empty() {
+            write!(f, ": {msg}")?;
+        }
+        if !call_tree.is_empty() {
+            write!(f, "\nCall tree:\n{call_tree}")?;
+        }
+        Ok(())
     }
 }
 
@@ -63,12 +170,21 @@ impl fmt::Display for PvaMsg {
         writeln!(f, "  {:<14}: {:?}", "Origin", flags.origin)?;
         writeln!(f, "  {:<14}: {:?}", "Endian", flags.endian)?;
         writeln!(f, "  {:<14}: {}", "Command", self.header.cmd())?;
-        writeln!(
-            f,
-            "  {:<14}: {}",
-            "Payload Size",
-            self.header.payload_size()
-        )?;
+        if self.header.is_set_byte_order() {
+            writeln!(
+                f,
+                "  {:<14}: 0x{:08x}",
+                "Control Data",
+                self.header.set_byte_order_data().unwrap_or_default()
+            )?;
+        } else {
+            writeln!(
+                f,
+                "  {:<14}: {}",
+                "Payload Size",
+                self.header.payload_size()
+            )?;
+        }
 
         let payload_len = self.payload.len();
         let show_len = payload_len.min(80);
@@ -126,8 +242,35 @@ impl PvaMsg {
         })
     }
 
+    /**
+     * Build the server-to-client `SET_ENDIANESS` control message.
+     */
+    pub fn new_set_byte_order(
+        src: Option<SocketAddr>,
+        dest: Vec<SocketAddr>,
+        endian: MsgEndian,
+        data: u32,
+    ) -> Result<Self, String> {
+        Ok(Self {
+            header: PvaHeader::new_set_byte_order(endian, data)?,
+            src,
+            dest,
+            payload: Vec::new(),
+        })
+    }
+
     pub fn validate(&self) -> Result<(), String> {
         self.header.validate()?;
+
+        if self.header.is_set_byte_order() {
+            if !self.payload.is_empty() {
+                return Err(String::from(
+                    "Error: PVA SET_ENDIANESS control message cannot have a payload",
+                ));
+            }
+            return Ok(());
+        }
+
         let expected = usize::try_from(self.header.payload_size())
             .map_err(|_| String::from("Error: PVA payload size does not fit in usize"))?;
         if self.payload.len() != expected {
@@ -150,7 +293,8 @@ impl PvaMsg {
     }
 
     /**
-     * Decode all complete PVA application messages in `buf`.
+     * Decode all complete PVA application messages and supported control
+     * messages in `buf`.
      *
      * Complete messages are removed from the front of the buffer. An
      * incomplete trailing message is retained for TCP and discarded for UDP.
@@ -230,54 +374,14 @@ impl PvaMsg {
     pub fn payload(&self) -> &[u8] {
         &self.payload
     }
-}
 
-#[derive(Clone, Debug, Eq, PartialEq)]
-pub struct PvaCtrlMsg {
-    header: PvaCtrlHeader,
-}
-
-impl PvaCtrlMsg {
-    pub fn new(
-        origin: MsgOrigin,
-        endian: MsgEndian,
-        cmd: PvaCtrlCmd,
-        data: u32,
-    ) -> Result<Self, String> {
-        Ok(Self {
-            header: PvaCtrlHeader::new(origin, endian, cmd, data)?,
-        })
-    }
-
-    pub fn to_buf(&self) -> Result<Vec<u8>, String> {
-        self.validate()?;
-        self.header.to_buf()
-    }
-
-    pub fn from_buf(buf: &[u8], offset: &mut usize) -> Result<Self, String> {
-        let header_end = offset
-            .checked_add(PVA_HEADER_SIZE)
-            .ok_or_else(|| String::from("Error: PVA control message header offset overflow"))?;
-        if header_end > buf.len() {
-            return Err(String::from(
-                "Warning: Remaining buffer too short for PVA control message header",
-            ));
-        }
-
-        let message = Self {
-            header: PvaCtrlHeader::from_buf(&buf[*offset..header_end])?,
-        };
-        message.validate()?;
-        *offset = header_end;
-        Ok(message)
-    }
-
-    pub fn header(&self) -> &PvaCtrlHeader {
-        &self.header
-    }
-
-    pub fn validate(&self) -> Result<(), String> {
-        self.header.validate()
+    /**
+     * Return the selected byte order and control data for `SET_ENDIANESS`.
+     */
+    pub fn set_byte_order(&self) -> Option<(MsgEndian, u32)> {
+        self.header
+            .set_byte_order_data()
+            .map(|data| (self.header.flags().endian, data))
     }
 }
 
@@ -285,7 +389,7 @@ pub fn build_connection_validation(
     authnz: PvaAuthnz,
     endian: MsgEndian,
     pva_type_registry: &mut PvaTypeRegistry,
-) -> Result<Vec<u8>, String> {
+) -> Result<PvaMsg, String> {
     // struct connectionValidationResponse {
     //     int clientReceiveBufferSize;
     //     short clientIntrospectionRegistryMaxSize;
@@ -362,8 +466,7 @@ pub fn build_connection_validation(
         endian,
         PvaCmd::ConnectionValidation,
         buf,
-    )?
-    .to_buf()
+    )
 }
 
 pub fn build_echo(endian: MsgEndian) -> Result<Vec<u8>, String> {
@@ -515,15 +618,10 @@ pub fn build_search(
 }
 
 pub fn build_create_channel(
-    name: String,
-    cid: u32,
+    names_cids: Vec<(String, u32)>,
     endian: MsgEndian,
     pva_type_registry: &mut PvaTypeRegistry,
-) -> Result<Vec<u8>, String> {
-    // validate channel name
-    if name.len() > 500 || name.len() == 0 {
-        return Err("Channel name too long or 0 size".to_string());
-    }
+) -> Result<PvaMsg, String> {
     // struct createChannelRequest {
     //     short count;
     //     struct {
@@ -533,9 +631,10 @@ pub fn build_create_channel(
     // };
     let mut buf: Vec<u8> = vec![];
 
-    // count, fixed to be 1
-    let count: i16 = 1;
-    count.to_buf(&PvaType::Short, &mut buf, endian)?;
+    // count
+    let count =
+        u16::try_from(names_cids.len()).map_err(|_| "Too many channel names".to_string())?;
+    count.to_buf(&PvaType::UShort, &mut buf, endian)?;
 
     // channel type
     let typ = Arc::new(PvaType::Struct(Arc::new(PvaStructType {
@@ -551,11 +650,19 @@ pub fn build_create_channel(
             }),
         ],
     })));
-    // only one name allowed
-    let struct_value = PvaValue::Struct(PvaStructValue {
-        fields: vec![PvaValue::UInt(cid), PvaValue::String(name)],
-    });
-    struct_value.to_buf(Arc::clone(&typ), &mut buf, endian, pva_type_registry)?;
+
+    for (name, cid) in names_cids {
+        // validate channel name
+        if name.len() > 500 || name.len() == 0 {
+            return Err("Channel name too long or 0 size".to_string());
+        }
+
+        // only one name allowed
+        let struct_value = PvaValue::Struct(PvaStructValue {
+            fields: vec![PvaValue::UInt(cid), PvaValue::String(name)],
+        });
+        struct_value.to_buf(Arc::clone(&typ), &mut buf, endian, pva_type_registry)?;
+    }
 
     PvaMsg::new(
         MsgSeg::NotSeg,
@@ -565,8 +672,7 @@ pub fn build_create_channel(
         endian,
         PvaCmd::CreateChannel,
         buf,
-    )?
-    .to_buf()
+    )
 }
 
 pub fn build_destroy_channel(cid: u32, sid: u32, endian: MsgEndian) -> Result<Vec<u8>, String> {
@@ -1412,3 +1518,36 @@ pub fn build_cancel_request(sid: u32, ioid: u32, endian: MsgEndian) -> Result<Ve
 // Echo request (0x03)
 
 // Echo response (0x04)
+
+#[cfg(test)]
+mod tests {
+    use super::{MsgEndian, MsgOrigin, MsgSeg, PvaCmd, PvaMsg};
+
+    #[test]
+    fn decodes_set_byte_order_followed_by_application_message() {
+        let control = PvaMsg::new_set_byte_order(None, vec![], MsgEndian::Big, 0).unwrap();
+        let application = PvaMsg::new(
+            MsgSeg::NotSeg,
+            MsgOrigin::Server,
+            None,
+            vec![],
+            MsgEndian::Big,
+            PvaCmd::ConnectionValidation,
+            vec![],
+        )
+        .unwrap();
+
+        let mut buf = control.to_buf().unwrap();
+        buf.extend_from_slice(&application.to_buf().unwrap());
+
+        let messages = PvaMsg::from_buf(&mut buf, None, vec![], true);
+
+        assert!(buf.is_empty());
+        assert_eq!(messages.len(), 2);
+        assert_eq!(messages[0].header().cmd(), PvaCmd::SetEndianess);
+        assert_eq!(messages[0].set_byte_order(), Some((MsgEndian::Big, 0)));
+        assert!(messages[0].payload().is_empty());
+        assert_eq!(messages[1].header().cmd(), PvaCmd::ConnectionValidation);
+        assert_eq!(messages[1].set_byte_order(), None);
+    }
+}

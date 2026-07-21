@@ -85,7 +85,7 @@ fn handle_ca_proto_echo(msg: CaMsg) {
     let addr = msg.src().as_ref();
     match addr {
         Some(addr) => {
-            let tcp = get_context().tcps().tcp(addr);
+            let tcp = get_context().ca_tcps().tcp(addr);
             match tcp {
                 Some(tcp) => {
                     tcp.set_alive(true);
@@ -133,7 +133,7 @@ pub fn handle_ca_proto_search(msg: CaMsg) {
 
     // connect TCP (if not connected yet), and send handshake packets
     let server_addr = SocketAddr::new(src.ip(), server_port);
-    if let Some(tcp) = context.tcps().tcp(&server_addr) {
+    if let Some(tcp) = context.ca_tcps().tcp(&server_addr) {
         // channel.connect_with_existing_tcp(tcp, server_addr);
         channel.set_state(ChannelState::TcpConnected, true);
         // add this channel to TCP
@@ -285,17 +285,17 @@ fn handle_ca_proto_event_add(msg: CaMsg) -> bool {
     if channel.monitor_state() == MonitorState::Starting {
         // for benchmark
         get_context()
-            .tcps()
+            .ca_tcps()
             .running_monitor_count
             .fetch_add(1, Ordering::Relaxed);
         if get_context()
-            .tcps()
+            .ca_tcps()
             .running_monitor_count
             .load(Ordering::Relaxed)
             == 100000
         {
             println!("OKOKOK");
-            let start = get_context().tcps().start;
+            let start = get_context().ca_tcps().start;
             let elapsed = start.elapsed();
 
             println!("elapsed: {:?}", elapsed);

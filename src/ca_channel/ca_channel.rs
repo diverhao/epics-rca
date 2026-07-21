@@ -1,8 +1,8 @@
+use crate::ca_channel::ca_meta::CaMeta;
+use crate::ca_channel::ca_monitor::{self, CaMonitor, MonitorDataType, MonitorState};
 use crate::ca_channel::dbr::{ChannelAccessRights, ChannelSeverity, ChannelState, ChannelStatus};
 use crate::ca_channel::dbr::{DbrType, DbrValue};
 use crate::ca_channel::dbr_data::{self, DbrData};
-use crate::ca_channel::ca_meta::CaMeta;
-use crate::ca_channel::ca_monitor::{self, CaMonitor, MonitorDataType, MonitorState};
 use crate::ca_message::message::CaMsg;
 use crate::context::context::get_context;
 use crate::tcp::tcp::TCP;
@@ -62,10 +62,10 @@ impl CaChannel {
 
         let cid = self.cid();
         let context = get_context();
-        let tcps = context.tcps();
+        let tcps = context.ca_tcps();
 
         // create TCP (if not exist) or get TCP (if already exist)
-        let tcp = tcps.create_tcp(addr).await;
+        let tcp = tcps.create_ca_tcp(addr).await;
 
         // failed to create TCP: this TCP is automatically disgarded, then reconnect the channel
         let tcp = match tcp {
@@ -102,7 +102,7 @@ impl CaChannel {
         };
 
         let context = get_context();
-        let tcp = match context.tcps().tcp(&dest) {
+        let tcp = match context.ca_tcps().tcp(&dest) {
             Some(tcp) => tcp,
             None => return,
         };
@@ -113,7 +113,7 @@ impl CaChannel {
         let host_name_msg = CaMsg::build_host_name(&dests);
         let create_chan_msg = CaMsg::build_create_chan(self.name(), self.cid(), &dests);
 
-        tcp.send_msgs(vec![create_chan_msg]);
+        tcp.send_ca_msgs(vec![create_chan_msg]);
     }
 
     /**
@@ -156,12 +156,12 @@ impl CaChannel {
         // send out CA_PROTO_CLEAR_CHANNEL, if TCP still exists in TCPs
         match addr {
             Some(addr) => {
-                let tcp = get_context().tcps().tcp(&addr);
+                let tcp = get_context().ca_tcps().tcp(&addr);
                 match tcp {
                     Some(tcp) => {
                         // Tell server to clear channel: Send CA_PROTO_CLEAR_CHANNEL
                         let msg = CaMsg::build_clear_channel(sid, cid, &vec![addr]);
-                        tcp.send_msgs(vec![msg]);
+                        tcp.send_ca_msgs(vec![msg]);
                         // .await {
                         //     Ok(_) => {}
                         //     Err(error) => {}
@@ -333,13 +333,13 @@ impl CaChannel {
             };
 
             let msg = CaMsg::build_read_notify(data_type, data_count, sid, ioid, &vec![dest]);
-            let tcp: Arc<TCP> = match get_context().tcps().tcp(&dest) {
+            let tcp: Arc<TCP> = match get_context().ca_tcps().tcp(&dest) {
                 Some(tcp) => tcp,
                 None => return, // no such TCP, let TCP alive check handle it
             };
 
             // send out CA_PROTO_READ_NOTIFY
-            tcp.send_msgs(vec![msg]);
+            tcp.send_ca_msgs(vec![msg]);
             // .await {
             //     Ok(_) => {}
             //     Err(error) => {
@@ -405,7 +405,7 @@ impl CaChannel {
         let addr = self.addr();
         match addr {
             Some(addr) => {
-                let tcp = get_context().tcps().tcp(&addr);
+                let tcp = get_context().ca_tcps().tcp(&addr);
                 match tcp {
                     Some(tcp) => Some(tcp),
                     None => None,

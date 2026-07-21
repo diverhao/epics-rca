@@ -158,7 +158,7 @@ fn print_traffic_stats() {
 fn print_container_stats() {
     let context = get_context();
     let channel_stats = context.ca_channels().capacity_stats();
-    let tcp_stats = context.tcps().capacity_stats();
+    let tcp_stats = context.ca_tcps().capacity_stats();
 
     println!(
         "channels maps: searching_by_name len/cap {}/{}, searching_by_cid {}/{}, not_searching_by_cid {}/{}, ios {}/{}",
